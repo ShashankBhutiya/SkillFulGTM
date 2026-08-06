@@ -32,6 +32,7 @@ npm run dev
 
 | Variable | Where to get it |
 | --- | --- |
+| `DATABASE_URL` | Neon / Supabase / Vercel Postgres — use the **pooled** connection string |
 | `GEMINI_API_KEYS` | aistudio.google.com/apikey — one key, or several comma-separated |
 | `EXA_API_KEY` | dashboard.exa.ai |
 | `HUNTER_API_KEY` | hunter.io → API |
@@ -62,7 +63,7 @@ provider will rewrite or reject the message.
 | `src/lib/providers/hunter.ts` | Stage 2: a domain → contactable people with emails. |
 | `src/lib/providers/index.ts` | Combines both behind a `LeadProvider` interface — swap the source without touching the agents. |
 | `src/lib/email/` | Compose, suppression, throttle, signed unsubscribe. |
-| `src/lib/db.ts` | SQLite via Node's built-in driver. No native module to compile. |
+| `src/lib/db.ts` | Postgres via `pg`. Async throughout — serverless filesystems are read-only and ephemeral, so the suppression list cannot live in a local file. |
 
 ### Models and cost
 

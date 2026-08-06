@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db, newId, nowIso, store } from "@/lib/db";
+import { newId, sql, store, tx } from "@/lib/db";
 import { leadProvider } from "@/lib/providers";
 import { IcpSchema } from "@/lib/schemas";
 
@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     limit?: number;
   };
 
-  const campaign = campaignId ? store.getCampaign(campaignId) : undefined;
+  const campaign = campaignId ? await store.getCampaign(campaignId) : undefined;
   if (!campaign?.icp) {
     return NextResponse.json({ error: "Campaign or ICP not found" }, { status: 404 });
   }
@@ -24,41 +24,49 @@ export async function POST(req: Request) {
   try {
     const { leads, totalAvailable, warnings } = await leadProvider().search(icp, capped);
 
-    // A re-run replaces the list rather than appending duplicates.
-    db().prepare("DELETE FROM leads WHERE campaign_id = ?").run(campaign.id);
-    const insert = db().prepare(
-      `INSERT INTO leads (id, campaign_id, external_id, first_name, last_name, title,
-                          email, email_status, linkedin_url, company_name, company_domain,
-                          company_blurb, raw, selected, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    // Suppression is checked up front so the whole write is one transaction.
+    const suppressed = new Set(
+      (
+        await sql<{ email: string }>(
+          "SELECT email FROM suppression WHERE email = ANY($1::text[])",
+          [leads.map((l) => l.email.toLowerCase()).filter(Boolean)],
+        )
+      ).map((r) => r.email),
     );
 
-    for (const l of leads) {
-      const suppressed = l.email ? store.isSuppressed(l.email) : false;
-      insert.run(
-        newId("lead"),
-        campaign.id,
-        l.externalId,
-        l.firstName,
-        l.lastName,
-        l.title,
-        l.email,
-        l.emailStatus,
-        l.linkedinUrl,
-        l.companyName,
-        l.companyDomain,
-        l.companyBlurb,
-        JSON.stringify(l.raw),
-        // Preselect only leads that can actually be mailed.
-        l.email && !suppressed ? 1 : 0,
-        nowIso(),
-      );
-    }
-
-    db().prepare("UPDATE campaigns SET status = 'leads' WHERE id = ?").run(campaign.id);
+    await tx(async (c) => {
+      // A re-run replaces the list rather than appending duplicates.
+      await c.query("DELETE FROM leads WHERE campaign_id = $1", [campaign.id]);
+      for (const l of leads) {
+        await c.query(
+          `INSERT INTO leads (id, campaign_id, external_id, first_name, last_name, title,
+                              email, email_status, linkedin_url, company_name, company_domain,
+                              company_blurb, raw, selected)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [
+            newId("lead"),
+            campaign.id,
+            l.externalId,
+            l.firstName,
+            l.lastName,
+            l.title,
+            l.email,
+            l.emailStatus,
+            l.linkedinUrl,
+            l.companyName,
+            l.companyDomain,
+            l.companyBlurb,
+            JSON.stringify(l.raw),
+            // Preselect only leads that can actually be mailed.
+            Boolean(l.email) && !suppressed.has(l.email.toLowerCase()),
+          ],
+        );
+      }
+      await c.query("UPDATE campaigns SET status = 'leads' WHERE id = $1", [campaign.id]);
+    });
 
     return NextResponse.json({
-      leads: store.listLeads(campaign.id),
+      leads: await store.listLeads(campaign.id),
       totalAvailable,
       warnings,
     });
@@ -78,7 +86,7 @@ export async function PATCH(req: Request) {
   };
   if (!leadId) return NextResponse.json({ error: "leadId is required" }, { status: 400 });
 
-  const lead = store.getLead(leadId);
+  const lead = await store.getLead(leadId);
   if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
   if (selected && !lead.email) {
     return NextResponse.json(
@@ -87,6 +95,6 @@ export async function PATCH(req: Request) {
     );
   }
 
-  db().prepare("UPDATE leads SET selected = ? WHERE id = ?").run(selected ? 1 : 0, leadId);
+  await sql("UPDATE leads SET selected = $1 WHERE id = $2", [Boolean(selected), leadId]);
   return NextResponse.json({ ok: true });
 }

@@ -9,10 +9,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const campaign = store.getCampaign(id);
+  const campaign = await store.getCampaign(id);
   if (!campaign) {
     return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   }
+
+  const [leads, drafts] = await Promise.all([store.listLeads(id), store.listDrafts(id)]);
 
   return NextResponse.json({
     campaign: {
@@ -23,7 +25,7 @@ export async function GET(
     },
     companyInput: JSON.parse(campaign.company_input),
     icp: campaign.icp ? JSON.parse(campaign.icp) : null,
-    leads: store.listLeads(id),
-    drafts: store.listDrafts(id),
+    leads,
+    drafts,
   });
 }

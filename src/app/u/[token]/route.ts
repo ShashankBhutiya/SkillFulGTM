@@ -1,4 +1,4 @@
-import { db, store } from "@/lib/db";
+import { sql, store } from "@/lib/db";
 import { verifyUnsubscribeToken } from "@/lib/email/unsubscribe";
 
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function GET(
     return page("Link not valid", "This unsubscribe link is invalid or has been altered.");
   }
 
-  if (store.isSuppressed(email)) {
+  if (await store.isSuppressed(email)) {
     return page("Already unsubscribed", `<b>${email}</b> will not receive further messages.`);
   }
 
@@ -57,9 +57,9 @@ export async function POST(
     return page("Link not valid", "This unsubscribe link is invalid or has been altered.");
   }
 
-  store.suppress(email, "recipient opted out");
+  await store.suppress(email, "recipient opted out");
   // Deselect everywhere so the address cannot re-enter a future batch.
-  db().prepare("UPDATE leads SET selected = 0 WHERE lower(email) = ?").run(email);
+  await sql("UPDATE leads SET selected = FALSE WHERE lower(email) = $1", [email]);
 
   return page("Unsubscribed", `<b>${email}</b> has been removed. You won't hear from us again.`);
 }

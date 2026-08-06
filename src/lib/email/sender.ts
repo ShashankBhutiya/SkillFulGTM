@@ -1,6 +1,6 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../env";
-import { db, newId, nowIso, store, type DraftRow, type LeadRow } from "../db";
+import { newId, sql, store, type DraftRow, type LeadRow } from "../db";
 import { compose } from "./compose";
 import { verifyEmail } from "../providers/hunter";
 
@@ -34,18 +34,19 @@ export type SendOutcome = {
   detail: string;
 };
 
-function record(
+async function record(
   campaignId: string,
   draftId: string,
   email: string,
   status: SendOutcome["status"],
   detail: string,
   messageId = "",
-): void {
-  db().prepare(
-    `INSERT INTO sends (id, campaign_id, draft_id, email, status, detail, message_id, sent_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(newId("snd"), campaignId, draftId, email.toLowerCase(), status, detail, messageId, nowIso());
+): Promise<void> {
+  await sql(
+    `INSERT INTO sends (id, campaign_id, draft_id, email, status, detail, message_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [newId("snd"), campaignId, draftId, email.toLowerCase(), status, detail, messageId],
+  );
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -75,9 +76,9 @@ async function checkDeliverable(
   // An unverifiable address (accept-all domain) may well be real, so it is
   // skipped for this run but left eligible if the operator opts in later.
   if (!verdict.unknown) {
-    store.suppress(email, `bad address: ${verdict.detail}`);
+    await store.suppress(email, `bad address: ${verdict.detail}`);
   }
-  record(campaignId, draftId, email, "skipped", verdict.detail);
+  await record(campaignId, draftId, email, "skipped", verdict.detail);
   return { ok: false, detail: verdict.detail };
 }
 
@@ -90,7 +91,7 @@ export async function sendBatch(
   const s = env.smtp;
   const from = s.fromName ? `"${s.fromName}" <${s.from}>` : s.from;
 
-  let budget = env.maxSendsPerDay - store.sendsInLastDay();
+  let budget = env.maxSendsPerDay - (await store.sendsInLastDay());
 
   for (const [i, { draft, lead } ] of items.entries()) {
     const email = lead.email.trim().toLowerCase();
@@ -99,20 +100,20 @@ export async function sendBatch(
 
     if (!email) {
       outcome = { email: "", status: "skipped", detail: "No email address on this lead." };
-      record(campaignId, draft.id, "", "skipped", outcome.detail);
-    } else if (store.isSuppressed(email)) {
+      await record(campaignId, draft.id, "", "skipped", outcome.detail);
+    } else if (await store.isSuppressed(email)) {
       outcome = { email, status: "skipped", detail: "Address is on the suppression list." };
-      record(campaignId, draft.id, email, "skipped", outcome.detail);
-    } else if (store.alreadySent(campaignId, email)) {
+      await record(campaignId, draft.id, email, "skipped", outcome.detail);
+    } else if (await store.alreadySent(campaignId, email)) {
       outcome = { email, status: "skipped", detail: "Already mailed in this campaign." };
-      record(campaignId, draft.id, email, "skipped", outcome.detail);
+      await record(campaignId, draft.id, email, "skipped", outcome.detail);
     } else if (budget <= 0) {
       outcome = {
         email,
         status: "skipped",
         detail: `Daily cap of ${env.maxSendsPerDay} reached. Resume tomorrow or raise MAX_SENDS_PER_DAY.`,
       };
-      record(campaignId, draft.id, email, "skipped", outcome.detail);
+      await record(campaignId, draft.id, email, "skipped", outcome.detail);
     } else if (!(verdict = await checkDeliverable(email, campaignId, draft.id)).ok) {
       outcome = { email, status: "skipped", detail: verdict.detail };
     } else {
@@ -139,11 +140,11 @@ export async function sendBatch(
         });
         budget -= 1;
         outcome = { email, status: "sent", detail: "" };
-        record(campaignId, draft.id, email, "sent", "", info.messageId ?? "");
+        await record(campaignId, draft.id, email, "sent", "", info.messageId ?? "");
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         outcome = { email, status: "failed", detail };
-        record(campaignId, draft.id, email, "failed", detail);
+        await record(campaignId, draft.id, email, "failed", detail);
       }
     }
 

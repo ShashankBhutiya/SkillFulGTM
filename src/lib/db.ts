@@ -1,23 +1,24 @@
-import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { Pool, type PoolClient } from "pg";
+import { env } from "./env";
 
 /**
- * Storage is a local SQLite file via Node's built-in driver — no native module
- * to compile. Swap this file for a real database when you move off one machine;
- * nothing above it imports `node:sqlite` directly.
+ * Storage is Postgres. It replaced a local SQLite file when this moved to
+ * serverless hosting: those filesystems are read-only and ephemeral, so the
+ * suppression list — the one table that must never be lost, because a reset
+ * makes previously-bounced addresses mailable again — could not live there.
+ *
+ * Nothing above this file imports `pg` directly.
  */
 
 const SCHEMA = `
-PRAGMA journal_mode = WAL;
-
 CREATE TABLE IF NOT EXISTS campaigns (
   id            TEXT PRIMARY KEY,
   company_name  TEXT NOT NULL,
-  company_input TEXT NOT NULL,        -- JSON: CompanyInput
-  icp           TEXT,                 -- JSON: Icp
-  status        TEXT NOT NULL,        -- draft | leads | drafted | sending | done
-  created_at    TEXT NOT NULL
+  company_input TEXT NOT NULL,
+  icp           TEXT,
+  status        TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  seq           BIGSERIAL
 );
 
 CREATE TABLE IF NOT EXISTS leads (
@@ -34,8 +35,9 @@ CREATE TABLE IF NOT EXISTS leads (
   company_domain TEXT NOT NULL DEFAULT '',
   company_blurb  TEXT NOT NULL DEFAULT '',
   raw            TEXT NOT NULL DEFAULT '{}',
-  selected       INTEGER NOT NULL DEFAULT 1,
-  created_at     TEXT NOT NULL
+  selected       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  seq            BIGSERIAL
 );
 CREATE INDEX IF NOT EXISTS idx_leads_campaign ON leads(campaign_id);
 
@@ -48,8 +50,9 @@ CREATE TABLE IF NOT EXISTS drafts (
   basis       TEXT NOT NULL DEFAULT '',
   persona     TEXT NOT NULL DEFAULT '',
   confidence  TEXT NOT NULL DEFAULT '',
-  approved    INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL
+  approved    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  seq         BIGSERIAL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_lead ON drafts(lead_id);
 
@@ -58,41 +61,87 @@ CREATE TABLE IF NOT EXISTS sends (
   campaign_id TEXT NOT NULL,
   draft_id    TEXT NOT NULL,
   email       TEXT NOT NULL,
-  status      TEXT NOT NULL,          -- sent | failed | skipped
+  status      TEXT NOT NULL,
   detail      TEXT NOT NULL DEFAULT '',
   message_id  TEXT NOT NULL DEFAULT '',
-  sent_at     TEXT NOT NULL
+  sent_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_sends_at ON sends(sent_at);
 
 CREATE TABLE IF NOT EXISTS suppression (
   email      TEXT PRIMARY KEY,
   reason     TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 `;
 
-function open(): DatabaseSync {
-  const dir = join(process.cwd(), "data");
-  mkdirSync(dir, { recursive: true });
-  const handle = new DatabaseSync(join(dir, "skillful.db"));
-  // WAL lets a reader and the writer coexist; the timeout covers the moment
-  // where they don't.
-  handle.exec("PRAGMA busy_timeout = 5000");
-  handle.exec(SCHEMA);
-  return handle;
+/**
+ * Pool and init promise are cached on globalThis: Next.js re-evaluates modules
+ * on every edit in dev, which would otherwise leak a pool per reload, and each
+ * serverless instance should reuse one pool across invocations.
+ */
+const globalRef = globalThis as unknown as {
+  __skillfulPool?: Pool;
+  __skillfulReady?: Promise<void>;
+};
+
+function pool(): Pool {
+  if (globalRef.__skillfulPool) return globalRef.__skillfulPool;
+
+  const connectionString = env.databaseUrl;
+  globalRef.__skillfulPool = new Pool({
+    connectionString,
+    // Serverless runs many short-lived instances; a large pool per instance
+    // exhausts the server's connection limit. Use a pooled/pgbouncer URL too.
+    max: 3,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+    // Hosted Postgres (Neon, Supabase, Vercel) requires TLS but presents certs
+    // that fail default verification from serverless runtimes.
+    ssl: /localhost|127\.0\.0\.1/.test(connectionString)
+      ? undefined
+      : { rejectUnauthorized: false },
+  });
+  return globalRef.__skillfulPool;
 }
 
-// Opened on first query, never at import time: `next build` imports every route
-// module across several worker processes, and opening a handle as an import
-// side effect makes them race for the database lock.
-//
-// The handle is cached on globalThis because Next.js dev re-evaluates modules
-// on every edit, which would otherwise leak a file handle per reload.
-const globalRef = globalThis as unknown as { __skillfulDb?: DatabaseSync };
+/** Applies the schema once per process. Idempotent, so concurrent boots are safe. */
+function ready(): Promise<void> {
+  return (globalRef.__skillfulReady ??= pool()
+    .query(SCHEMA)
+    .then(() => undefined)
+    .catch((err: unknown) => {
+      // Let the next call retry rather than caching a permanent failure.
+      globalRef.__skillfulReady = undefined;
+      throw err;
+    }));
+}
 
-export function db(): DatabaseSync {
-  return (globalRef.__skillfulDb ??= open());
+/** Runs a parameterised query, ensuring the schema exists first. */
+export async function sql<T = Record<string, unknown>>(
+  text: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  await ready();
+  const res = await pool().query(text, params);
+  return res.rows as T[];
+}
+
+/** Runs several statements in one transaction. */
+export async function tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
+  await ready();
+  const client = await pool().connect();
+  try {
+    await client.query("BEGIN");
+    const out = await fn(client);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export function newId(prefix: string): string {
@@ -130,7 +179,8 @@ export type LeadRow = {
   company_domain: string;
   company_blurb: string;
   raw: string;
-  selected: number;
+  /** Postgres BOOLEAN. Was 0/1 under SQLite — compare truthily, not to 1. */
+  selected: boolean;
   created_at: string;
 };
 
@@ -143,7 +193,7 @@ export type DraftRow = {
   basis: string;
   persona: string;
   confidence: string;
-  approved: number;
+  approved: boolean;
   created_at: string;
 };
 
@@ -152,82 +202,80 @@ export type DraftRow = {
 /* -------------------------------------------------------------------------- */
 
 export const store = {
-  getCampaign(id: string): CampaignRow | undefined {
-    return db().prepare("SELECT * FROM campaigns WHERE id = ?").get(id) as
-      | CampaignRow
-      | undefined;
+  async getCampaign(id: string): Promise<CampaignRow | undefined> {
+    const rows = await sql<CampaignRow>("SELECT * FROM campaigns WHERE id = $1", [id]);
+    return rows[0];
   },
 
-  listCampaigns(): CampaignRow[] {
-    return db()
-      .prepare("SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 50")
-      .all() as unknown as CampaignRow[];
+  async listCampaigns(): Promise<CampaignRow[]> {
+    return sql<CampaignRow>("SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 50");
   },
 
-  listLeads(campaignId: string): LeadRow[] {
-    return db()
-      .prepare("SELECT * FROM leads WHERE campaign_id = ? ORDER BY rowid")
-      .all(campaignId) as unknown as LeadRow[];
+  async listLeads(campaignId: string): Promise<LeadRow[]> {
+    return sql<LeadRow>("SELECT * FROM leads WHERE campaign_id = $1 ORDER BY seq", [
+      campaignId,
+    ]);
   },
 
-  listSelectedLeads(campaignId: string): LeadRow[] {
-    return db()
-      .prepare(
-        "SELECT * FROM leads WHERE campaign_id = ? AND selected = 1 ORDER BY rowid",
-      )
-      .all(campaignId) as unknown as LeadRow[];
+  async listSelectedLeads(campaignId: string): Promise<LeadRow[]> {
+    return sql<LeadRow>(
+      "SELECT * FROM leads WHERE campaign_id = $1 AND selected ORDER BY seq",
+      [campaignId],
+    );
   },
 
-  getLead(id: string): LeadRow | undefined {
-    return db().prepare("SELECT * FROM leads WHERE id = ?").get(id) as LeadRow | undefined;
+  async getLead(id: string): Promise<LeadRow | undefined> {
+    const rows = await sql<LeadRow>("SELECT * FROM leads WHERE id = $1", [id]);
+    return rows[0];
   },
 
-  listDrafts(campaignId: string): DraftRow[] {
-    return db()
-      .prepare("SELECT * FROM drafts WHERE campaign_id = ? ORDER BY rowid")
-      .all(campaignId) as unknown as DraftRow[];
+  async listDrafts(campaignId: string): Promise<DraftRow[]> {
+    return sql<DraftRow>("SELECT * FROM drafts WHERE campaign_id = $1 ORDER BY seq", [
+      campaignId,
+    ]);
   },
 
-  getDraft(id: string): DraftRow | undefined {
-    return db().prepare("SELECT * FROM drafts WHERE id = ?").get(id) as DraftRow | undefined;
+  async getDraft(id: string): Promise<DraftRow | undefined> {
+    const rows = await sql<DraftRow>("SELECT * FROM drafts WHERE id = $1", [id]);
+    return rows[0];
   },
 
   /** Sends in the trailing 24h — the throttle window. */
-  sendsInLastDay(): number {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const row = db()
-      .prepare("SELECT COUNT(*) AS n FROM sends WHERE status = 'sent' AND sent_at > ?")
-      .get(since) as { n: number };
-    return row.n;
+  async sendsInLastDay(): Promise<number> {
+    const rows = await sql<{ n: string }>(
+      "SELECT COUNT(*) AS n FROM sends WHERE status = 'sent' AND sent_at > now() - interval '24 hours'",
+    );
+    return Number(rows[0]?.n ?? 0);
   },
 
-  lastSendAt(): string | null {
-    const row = db()
-      .prepare("SELECT sent_at FROM sends WHERE status = 'sent' ORDER BY sent_at DESC LIMIT 1")
-      .get() as { sent_at: string } | undefined;
-    return row?.sent_at ?? null;
+  async lastSendAt(): Promise<string | null> {
+    const rows = await sql<{ sent_at: string }>(
+      "SELECT sent_at FROM sends WHERE status = 'sent' ORDER BY sent_at DESC LIMIT 1",
+    );
+    return rows[0]?.sent_at ?? null;
   },
 
-  isSuppressed(email: string): boolean {
-    const row = db()
-      .prepare("SELECT 1 AS x FROM suppression WHERE email = ?")
-      .get(email.toLowerCase());
-    return Boolean(row);
+  async isSuppressed(email: string): Promise<boolean> {
+    const rows = await sql("SELECT 1 FROM suppression WHERE email = $1", [
+      email.toLowerCase(),
+    ]);
+    return rows.length > 0;
   },
 
-  suppress(email: string, reason: string): void {
-    db().prepare(
-      "INSERT OR REPLACE INTO suppression (email, reason, created_at) VALUES (?, ?, ?)",
-    ).run(email.toLowerCase(), reason, nowIso());
+  async suppress(email: string, reason: string): Promise<void> {
+    await sql(
+      `INSERT INTO suppression (email, reason) VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET reason = EXCLUDED.reason`,
+      [email.toLowerCase(), reason],
+    );
   },
 
   /** Has this address already been mailed from this campaign? */
-  alreadySent(campaignId: string, email: string): boolean {
-    const row = db()
-      .prepare(
-        "SELECT 1 AS x FROM sends WHERE campaign_id = ? AND email = ? AND status = 'sent'",
-      )
-      .get(campaignId, email.toLowerCase());
-    return Boolean(row);
+  async alreadySent(campaignId: string, email: string): Promise<boolean> {
+    const rows = await sql(
+      "SELECT 1 FROM sends WHERE campaign_id = $1 AND email = $2 AND status = 'sent'",
+      [campaignId, email.toLowerCase()],
+    );
+    return rows.length > 0;
   },
 };

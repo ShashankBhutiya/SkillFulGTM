@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db, store, type DraftRow, type LeadRow } from "@/lib/db";
+import { sql, store, type DraftRow, type LeadRow } from "@/lib/db";
 import { env } from "@/lib/env";
 import { sendBatch, verifyTransport, type SendOutcome } from "@/lib/email/sender";
 
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   }
 
   const { campaignId } = (await req.json()) as { campaignId?: string };
-  const campaign = campaignId ? store.getCampaign(campaignId) : undefined;
+  const campaign = campaignId ? await store.getCampaign(campaignId) : undefined;
   if (!campaign) {
     return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   }
@@ -50,14 +50,13 @@ export async function POST(req: Request) {
   }
 
   // Only drafts a human explicitly approved are eligible.
-  const rows = db()
-    .prepare(
-      `SELECT d.*, l.id AS l_id FROM drafts d
-       JOIN leads l ON l.id = d.lead_id
-       WHERE d.campaign_id = ? AND d.approved = 1 AND l.selected = 1 AND l.email <> ''
-       ORDER BY d.rowid`,
-    )
-    .all(campaign.id) as unknown as (DraftRow & { l_id: string })[];
+  const rows = await sql<DraftRow & { l_id: string }>(
+    `SELECT d.*, l.id AS l_id FROM drafts d
+     JOIN leads l ON l.id = d.lead_id
+     WHERE d.campaign_id = $1 AND d.approved AND l.selected AND l.email <> ''
+     ORDER BY d.seq`,
+    [campaign.id],
+  );
 
   if (!rows.length) {
     return NextResponse.json(
@@ -74,12 +73,14 @@ export async function POST(req: Request) {
     );
   }
 
-  const items = rows
-    .map((d) => {
-      const lead = store.getLead(d.lead_id);
-      return lead ? { draft: d as DraftRow, lead: lead as LeadRow } : null;
-    })
-    .filter((x): x is { draft: DraftRow; lead: LeadRow } => x !== null);
+  const items = (
+    await Promise.all(
+      rows.map(async (d) => {
+        const lead = await store.getLead(d.lead_id);
+        return lead ? { draft: d as DraftRow, lead } : null;
+      }),
+    )
+  ).filter((x): x is { draft: DraftRow; lead: LeadRow } => x !== null);
 
   const job: Job = {
     campaignId: campaign.id,
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
     startedAt: new Date().toISOString(),
   };
   jobs.set(campaign.id, job);
-  db().prepare("UPDATE campaigns SET status = 'sending' WHERE id = ?").run(campaign.id);
+  await sql("UPDATE campaigns SET status = 'sending' WHERE id = $1", [campaign.id]);
 
   void sendBatch(campaign.id, items, (outcome) => {
     job.outcomes.push(outcome);
@@ -101,7 +102,7 @@ export async function POST(req: Request) {
     })
     .finally(() => {
       job.running = false;
-      db().prepare("UPDATE campaigns SET status = 'done' WHERE id = ?").run(campaign.id);
+      void sql("UPDATE campaigns SET status = 'done' WHERE id = $1", [campaign.id]);
     });
 
   return NextResponse.json({
@@ -120,7 +121,7 @@ export async function GET(req: Request) {
   const job = jobs.get(campaignId);
   return NextResponse.json({
     job: job ?? null,
-    sentToday: store.sendsInLastDay(),
+    sentToday: await store.sendsInLastDay(),
     dailyCap: env.maxSendsPerDay,
   });
 }

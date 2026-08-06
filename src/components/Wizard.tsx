@@ -70,7 +70,7 @@ type Lead = {
   company_name: string;
   company_domain: string;
   linkedin_url: string;
-  selected: number;
+  selected: boolean;
 };
 
 type Draft = {
@@ -81,7 +81,7 @@ type Draft = {
   basis: string;
   persona: string;
   confidence: string;
-  approved: number;
+  approved: boolean;
 };
 
 type SendJob = {
@@ -93,6 +93,7 @@ type SendJob = {
 };
 
 type Config = {
+  database: boolean;
   gemini: boolean;
   exa: boolean;
   hunter: boolean;
@@ -188,7 +189,7 @@ export default function Wizard() {
   /* ---------------------------------------------------------------- step 3 */
 
   const toggleLead = async (lead: Lead) => {
-    const next = lead.selected ? 0 : 1;
+    const next = !lead.selected;
     setLeads((ls) => ls.map((l) => (l.id === lead.id ? { ...l, selected: next } : l)));
     try {
       await api("/api/leads", {
@@ -234,7 +235,7 @@ export default function Wizard() {
         draftId: id,
         subject: next.subject,
         body: next.body,
-        approved: next.approved === 1,
+        approved: Boolean(next.approved),
       }),
     }).catch((err: Error) => setError(err.message));
   };
@@ -256,6 +257,7 @@ export default function Wizard() {
   const selectedCount = leads.filter((l) => l.selected).length;
   const missing = config
     ? [
+        !config.database && "DATABASE_URL",
         !config.gemini && "GEMINI_API_KEYS",
         !config.exa && "EXA_API_KEY",
         !config.hunter && "HUNTER_API_KEY",
@@ -616,7 +618,7 @@ export default function Wizard() {
             <div className="flex gap-2">
               <Button
                 variant="ghost"
-                onClick={() => drafts.forEach((d) => persistDraft(d.id, { approved: 1 }))}
+                onClick={() => drafts.forEach((d) => persistDraft(d.id, { approved: true }))}
                 disabled={busy !== null || drafts.length === 0}
               >
                 Approve all
@@ -699,7 +701,7 @@ export default function Wizard() {
                       <input
                         type="checkbox"
                         checked={Boolean(d.approved)}
-                        onChange={() => persistDraft(d.id, { approved: d.approved ? 0 : 1 })}
+                        onChange={() => persistDraft(d.id, { approved: !d.approved })}
                         className="size-4 accent-emerald-500"
                       />
                       {d.approved ? "Approved" : "Approve"}

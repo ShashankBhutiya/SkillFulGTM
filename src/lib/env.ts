@@ -50,6 +50,11 @@ export const env = {
     return opt("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite");
   },
 
+  /** Postgres connection string. Use the pooled URL on serverless hosts. */
+  get databaseUrl() {
+    return req("DATABASE_URL");
+  },
+
   get webSearchProvider() {
     return opt("WEB_SEARCH_PROVIDER", "exa");
   },
@@ -131,6 +136,7 @@ export const env = {
 export function configStatus() {
   const check = (name: string) => Boolean(process.env[name]?.trim());
   return {
+    database: check("DATABASE_URL"),
     gemini: check("GEMINI_API_KEYS"),
     exa: check("EXA_API_KEY"),
     hunter: check("HUNTER_API_KEY"),

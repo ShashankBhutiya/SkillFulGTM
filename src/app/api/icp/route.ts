@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateIcp } from "@/lib/agents/icp";
 import { describeError } from "@/lib/gemini";
-import { db, newId, nowIso, store } from "@/lib/db";
+import { newId, sql, store } from "@/lib/db";
 import { CompanyInput } from "@/lib/schemas";
 
 export const runtime = "nodejs";
@@ -21,10 +21,11 @@ export async function POST(req: Request) {
   try {
     const icp = await generateIcp(input);
     const id = newId("cmp");
-    db().prepare(
-      `INSERT INTO campaigns (id, company_name, company_input, icp, status, created_at)
-       VALUES (?, ?, ?, ?, 'leads', ?)`,
-    ).run(id, input.name, JSON.stringify(input), JSON.stringify(icp), nowIso());
+    await sql(
+      `INSERT INTO campaigns (id, company_name, company_input, icp, status)
+       VALUES ($1, $2, $3, $4, 'leads')`,
+      [id, input.name, JSON.stringify(input), JSON.stringify(icp)],
+    );
 
     return NextResponse.json({ campaignId: id, icp });
   } catch (err) {
@@ -38,13 +39,13 @@ export async function PATCH(req: Request) {
   if (!campaignId || !icp) {
     return NextResponse.json({ error: "campaignId and icp are required" }, { status: 400 });
   }
-  if (!store.getCampaign(campaignId)) {
+  if (!(await store.getCampaign(campaignId))) {
     return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   }
 
-  db().prepare("UPDATE campaigns SET icp = ? WHERE id = ?").run(
+  await sql("UPDATE campaigns SET icp = $1 WHERE id = $2", [
     JSON.stringify(icp),
     campaignId,
-  );
+  ]);
   return NextResponse.json({ ok: true });
 }
