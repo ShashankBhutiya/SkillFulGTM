@@ -1,0 +1,30 @@
+{
+  "name": "skillful-gtm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "exa-js": "^1.5.0",
+    "next": "^15.5.0",
+    "nodemailer": "^7.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^24.0.0",
+    "@types/nodemailer": "^7.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.0"
+  }
+}

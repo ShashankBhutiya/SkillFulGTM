@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(npm --version)",
+      "Bash(npx --version)",
+      "Bash(node -e ' *)",
+      "Bash(npm install *)",
+      "Bash(npx next *)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./node_modules/@anthropic-ai/sdk/package.json'\\).exports||{}\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(node -e \"console.log\\('zod', require\\('./node_modules/zod/package.json'\\).version\\); console.log\\('toJSONSchema:', typeof require\\('zod'\\).toJSONSchema\\)\")"
+    ]
+  }
+}
