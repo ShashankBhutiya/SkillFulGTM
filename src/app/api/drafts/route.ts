@@ -5,31 +5,49 @@ import { db, newId, nowIso, store, type LeadRow } from "@/lib/db";
 import { CompanyInput, IcpSchema } from "@/lib/schemas";
 
 export const runtime = "nodejs";
-export const maxDuration = 800;
+// 300s is the ceiling on Vercel's Hobby plan. Drafting fans out CONCURRENCY
+// calls at a time, so a large batch can outrun this — see the cap below.
+export const maxDuration = 300;
 
 /** How many drafting calls are in flight at once. */
 const CONCURRENCY = 4;
+
+/**
+ * Stop starting new work with this much of the budget left. Rate-limit retries
+ * back off up to ~20s, so a draft started near the limit can overrun it — and
+ * being killed by the platform loses the response, not just the draft.
+ */
+const DEADLINE_MS = (maxDuration - 45) * 1000;
 
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
+  deadline?: number,
+): Promise<{ processed: number; remaining: T[] }> {
   let cursor = 0;
+  let processed = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
+      if (deadline && Date.now() > deadline) return;
       const i = cursor++;
-      results[i] = await fn(items[i]!);
+      await fn(items[i]!);
+      processed += 1;
     }
   });
   await Promise.all(workers);
-  return results;
+  // Anything the workers never claimed, plus anything abandoned at the deadline.
+  return { processed, remaining: items.slice(Math.min(cursor, items.length)) };
 }
 
 /** Step 3 — write one email per selected lead. */
 export async function POST(req: Request) {
-  const { campaignId } = (await req.json()) as { campaignId?: string };
+  const { campaignId, redraft } = (await req.json()) as {
+    campaignId?: string;
+    /** Rewrite leads that already have a draft. Off by default so a second
+     *  press resumes an interrupted run instead of paying for it twice. */
+    redraft?: boolean;
+  };
   const campaign = campaignId ? store.getCampaign(campaignId) : undefined;
   if (!campaign?.icp) {
     return NextResponse.json({ error: "Campaign or ICP not found" }, { status: 404 });
@@ -37,13 +55,21 @@ export async function POST(req: Request) {
 
   const company = CompanyInput.parse(JSON.parse(campaign.company_input));
   const icp = IcpSchema.parse(JSON.parse(campaign.icp));
-  const leads = store.listSelectedLeads(campaign.id).filter((l) => l.email);
+  const selected = store.listSelectedLeads(campaign.id).filter((l) => l.email);
 
-  if (!leads.length) {
+  if (!selected.length) {
     return NextResponse.json(
       { error: "No selected leads with an email address to draft for." },
       { status: 400 },
     );
+  }
+
+  const alreadyDrafted = new Set(store.listDrafts(campaign.id).map((d) => d.lead_id));
+  const leads = redraft ? selected : selected.filter((l) => !alreadyDrafted.has(l.id));
+
+  // Every selected lead already has a draft and no rewrite was asked for.
+  if (!leads.length) {
+    return NextResponse.json({ drafts: store.listDrafts(campaign.id), failures: [] });
   }
 
   const failures: { lead: string; error: string }[] = [];
@@ -60,7 +86,9 @@ export async function POST(req: Request) {
        approved = 0`,
   );
 
-  await mapLimit(leads, CONCURRENCY, async (lead: LeadRow) => {
+  const deadline = Date.now() + DEADLINE_MS;
+
+  const { remaining } = await mapLimit(leads, CONCURRENCY, async (lead: LeadRow) => {
     try {
       const draft = await draftEmail(company, icp, lead);
       upsert.run(
@@ -80,7 +108,17 @@ export async function POST(req: Request) {
         error: describeError(err),
       });
     }
-  });
+  }, deadline);
+
+  // Drafts are upserted per lead, so anything finished is already saved. Say
+  // plainly what was left rather than returning a silently short list.
+  if (remaining.length) {
+    failures.push({
+      lead: `${remaining.length} lead${remaining.length === 1 ? "" : "s"}`,
+      error:
+        "Ran out of time before drafting these. Everything already written is saved — press “Write emails” again to continue where it stopped.",
+    });
+  }
 
   db().prepare("UPDATE campaigns SET status = 'drafted' WHERE id = ?").run(campaign.id);
 
