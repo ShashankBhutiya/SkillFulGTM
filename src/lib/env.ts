@@ -50,9 +50,39 @@ export const env = {
     return opt("GEMINI_FAST_MODEL", "gemini-3.5-flash-lite");
   },
 
-  /** Postgres connection string. Use the pooled URL on serverless hosts. */
+  /**
+   * Postgres connection string.
+   *
+   * Managed integrations (Neon, Supabase, Vercel Postgres) inject several names
+   * at once, and picking the wrong one is a production-only failure: a direct
+   * connection works fine locally, then exhausts the server's connection limit
+   * once serverless starts running many instances of it. So prefer a URL that
+   * is demonstrably pooled, and only fall back to a direct one if that is all
+   * that exists.
+   */
   get databaseUrl() {
-    return req("DATABASE_URL");
+    const names = [
+      "DATABASE_URL",
+      "POSTGRES_URL",
+      "POSTGRES_PRISMA_URL",
+      "POSTGRES_URL_NON_POOLING",
+    ];
+    const found = names
+      .map((n) => [n, process.env[n]?.trim()] as const)
+      .filter((e): e is readonly [string, string] => Boolean(e[1]));
+
+    if (!found.length) {
+      throw new Error(
+        "No Postgres connection string. Set DATABASE_URL (use the pooled URL — Neon's '-pooler' host, or Supabase port 6543).",
+      );
+    }
+
+    const pooled = found.find(
+      ([name, url]) =>
+        name !== "POSTGRES_URL_NON_POOLING" &&
+        (/-pooler\./.test(url) || /pgbouncer=true/.test(url) || /:6543\//.test(url)),
+    );
+    return (pooled ?? found[0]!)[1];
   },
 
   get webSearchProvider() {
@@ -135,8 +165,23 @@ export const env = {
 /** Reports which settings are missing without throwing — used by the UI banner. */
 export function configStatus() {
   const check = (name: string) => Boolean(process.env[name]?.trim());
+
+  // Resolved through the same preference rules used to connect, so this
+  // reports what the app will actually do — never the credential itself.
+  let database = false;
+  let databasePooled = false;
+  try {
+    const url = env.databaseUrl;
+    database = true;
+    databasePooled =
+      /-pooler\./.test(url) || /pgbouncer=true/.test(url) || /:6543\//.test(url);
+  } catch {
+    database = false;
+  }
+
   return {
-    database: check("DATABASE_URL"),
+    database,
+    databasePooled,
     gemini: check("GEMINI_API_KEYS"),
     exa: check("EXA_API_KEY"),
     hunter: check("HUNTER_API_KEY"),

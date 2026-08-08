@@ -94,6 +94,7 @@ type SendJob = {
 
 type Config = {
   database: boolean;
+  databasePooled: boolean;
   gemini: boolean;
   exa: boolean;
   hunter: boolean;
@@ -258,6 +259,7 @@ export default function Wizard() {
   const missing = config
     ? [
         !config.database && "DATABASE_URL",
+        !config.database && "DATABASE_URL",
         !config.gemini && "GEMINI_API_KEYS",
         !config.exa && "EXA_API_KEY",
         !config.hunter && "HUNTER_API_KEY",
@@ -276,6 +278,15 @@ export default function Wizard() {
           <code className="rounded bg-white/10 px-1">.env.example</code> to{" "}
           <code className="rounded bg-white/10 px-1">.env.local</code> and restart the dev
           server.
+        </Alert>
+      )}
+      {config?.database && !config.databasePooled && (
+        <Alert tone="warn">
+          <b>Using a direct database connection.</b> Serverless runs many instances at
+          once, and each opens its own connections — a non-pooled URL will hit the
+          server&apos;s connection limit under load. Use the pooled string (Neon&apos;s{" "}
+          <code className="rounded bg-white/10 px-1">-pooler</code> host, or Supabase port
+          6543).
         </Alert>
       )}
       {config && !config.publicBaseUrl && (
