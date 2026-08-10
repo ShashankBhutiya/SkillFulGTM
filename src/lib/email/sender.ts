@@ -159,3 +159,51 @@ export async function sendBatch(
 
   return outcomes;
 }
+
+/** Sends a single test email directly to the operator's inbox for verification. */
+export async function sendTestEmail({
+  to,
+  subject = "SkillfulGTM — Test Email Verification",
+  body = "This is a test email sent from SkillfulGTM to verify your SMTP delivery setup.",
+  firstName = "Test Recipient",
+}: {
+  to: string;
+  subject?: string;
+  body?: string;
+  firstName?: string;
+}): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  const s = env.smtp;
+  const from = s.fromName ? `"${s.fromName}" <${s.from}>` : s.from;
+
+  const { text, html, unsubscribeUrl } = compose({
+    firstName,
+    body: `${body}\n\n---\nNote: This is a test email copy sent from SkillfulGTM.`,
+    recipientEmail: to,
+  });
+
+  try {
+    const info = await transport().sendMail({
+      from,
+      to,
+      replyTo: s.replyTo || undefined,
+      subject: `[TEST] ${subject}`,
+      text,
+      html: `
+        <div style="background:#5b3ce0;color:#ffffff;padding:12px 18px;border-radius:8px;margin-bottom:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;">
+          🧪 <strong>TEST EMAIL COPY</strong> — Sent to <code>${to}</code> to verify SMTP delivery and preview layout.
+        </div>
+        ${html}
+      `,
+      headers: {
+        "List-Unsubscribe": `<${unsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+    });
+
+    return { ok: true, messageId: info.messageId };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: detail };
+  }
+}
+

@@ -1,0 +1,21 @@
+{
+  "name": "SkillfulGTM",
+  "short_name": "SkillfulGTM",
+  "description": "Agentic GTM — company in, ICP out, personalized outreach sent.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07070b",
+  "theme_color": "#7c5cff",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/apple-icon",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

@@ -24,6 +24,7 @@ const ITEMS = [
 export default function Guardrails() {
   return (
     <section id="how" className="sk-section px-5 py-20">
+      <div id="guardrails" className="scroll-mt-24" />
       <div className="mx-auto max-w-6xl">
         <div className="max-w-2xl">
           <div className="sk-eyebrow mb-3">Built for real sending</div>

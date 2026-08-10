@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -8,9 +8,41 @@ const inter = Inter({
   display: "swap",
 });
 
+export const viewport: Viewport = {
+  themeColor: "#07070b",
+  width: "device-width",
+  initialScale: 1,
+};
+
 export const metadata: Metadata = {
-  title: "SkillfulGTM",
-  description: "Agentic GTM — company in, ICP out, personalized outreach sent.",
+  title: {
+    default: "SkillfulGTM — Agentic GTM Outbound Pipeline",
+    template: "%s | SkillfulGTM",
+  },
+  description:
+    "Agentic GTM — company in, ideal customer profile out, decision-makers found, personalized outreach sent.",
+  keywords: ["GTM", "Agentic Sales", "Outbound Email", "AI SDR", "ICP Generator", "Exa", "Hunter"],
+  manifest: "/site.webmanifest",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/apple-icon", sizes: "180x180", type: "image/png" }],
+  },
+  openGraph: {
+    title: "SkillfulGTM — Agentic GTM Outbound Pipeline",
+    description:
+      "Describe your company. Get a pipeline, not a lead list. Powered by Gemini, Exa, and Hunter.",
+    siteName: "SkillfulGTM",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "SkillfulGTM — Agentic GTM Outbound Pipeline",
+    description: "Describe your company. Get a pipeline, not a lead list.",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -23,3 +55,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+

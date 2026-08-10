@@ -145,6 +145,78 @@ export default function Wizard() {
       .catch(() => setConfig(null));
   }, []);
 
+  // Test Email state
+  const [showTestModal, setShowTestModal] = useState(false);
+  const [testEmailAddress, setTestEmailAddress] = useState("");
+  const [testDraftId, setTestDraftId] = useState<string | null>(null);
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    ok: boolean;
+    recipient?: string;
+    messageId?: string;
+    error?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sk_test_email");
+      if (saved) setTestEmailAddress(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const openTestModal = (draftId?: string) => {
+    setTestDraftId(draftId ?? null);
+    setTestResult(null);
+    setShowTestModal(true);
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress || !testEmailAddress.includes("@")) {
+      setTestResult({ ok: false, error: "Please enter a valid email address." });
+      return;
+    }
+
+    try {
+      localStorage.setItem("sk_test_email", testEmailAddress.trim());
+    } catch {
+      // ignore
+    }
+
+    setTestSending(true);
+    setTestResult(null);
+
+    try {
+      const selectedDraft = drafts.find((d) => d.id === testDraftId);
+      const res = await api<{ ok: boolean; recipient: string; messageId?: string; error?: string }>(
+        "/api/send/test",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            toEmail: testEmailAddress.trim(),
+            draftId: testDraftId ?? undefined,
+            subject: selectedDraft?.subject,
+            body: selectedDraft?.body,
+          }),
+        }
+      );
+
+      setTestResult({
+        ok: true,
+        recipient: res.recipient,
+        messageId: res.messageId,
+      });
+    } catch (err) {
+      setTestResult({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setTestSending(false);
+    }
+  };
+
   const run = async (name: string, fn: () => Promise<void>) => {
     setBusy(name);
     setError(null);
@@ -269,7 +341,16 @@ export default function Wizard() {
 
   return (
     <div className="space-y-5">
-      <Steps current={step} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Steps current={step} />
+        <Button
+          variant="ghost"
+          className="text-xs py-1.5 px-3 border-violet-500/30 text-violet-300 hover:border-violet-400 hover:text-white"
+          onClick={() => openTestModal()}
+        >
+          🧪 Send Test Email
+        </Button>
+      </div>
 
       {missing.length > 0 && (
         <Alert tone="warn">
@@ -625,7 +706,13 @@ export default function Wizard() {
                 button.
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => openTestModal()}
+              >
+                🧪 Test Email
+              </Button>
               <Button
                 variant="ghost"
                 onClick={() => drafts.forEach((d) => persistDraft(d.id, { approved: true }))}
@@ -701,21 +788,30 @@ export default function Wizard() {
                       </div>
                     </div>
 
-                    <label
-                      className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-                        d.approved
-                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                          : "border-white/10 text-[#9494a8] hover:border-white/20 hover:text-[#d7d6e3]"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(d.approved)}
-                        onChange={() => persistDraft(d.id, { approved: !d.approved })}
-                        className="size-4 accent-emerald-500"
-                      />
-                      {d.approved ? "Approved" : "Approve"}
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openTestModal(d.id)}
+                        className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-[#9d85ff] hover:border-violet-400/40 hover:bg-violet-500/10 hover:text-white transition-colors"
+                      >
+                        🧪 Send copy
+                      </button>
+                      <label
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                          d.approved
+                            ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                            : "border-white/10 text-[#9494a8] hover:border-white/20 hover:text-[#d7d6e3]"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(d.approved)}
+                          onChange={() => persistDraft(d.id, { approved: !d.approved })}
+                          className="size-4 accent-emerald-500"
+                        />
+                        {d.approved ? "Approved" : "Approve"}
+                      </label>
+                    </div>
                   </div>
 
                   <div className="mb-1.5 flex items-center gap-2">
@@ -760,9 +856,129 @@ export default function Wizard() {
           </div>
         </div>
       )}
+
+      {/* Test Email Modal */}
+      {showTestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="sk-card w-full max-w-lg space-y-4 border border-violet-500/30 shadow-2xl bg-[#0e0e16]">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/20 text-violet-300">
+                  🧪
+                </span>
+                <div>
+                  <h3 className="font-semibold text-[#edecf2]">Send Test Email</h3>
+                  <p className="text-xs text-[#9494a8]">Send a copy directly to your inbox to verify SMTP delivery</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTestModal(false)}
+                className="text-[#9494a8] hover:text-white transition-colors"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div>
+              <label className={label}>Recipient Email Address</label>
+              <input
+                type="email"
+                className={input}
+                placeholder="your.name@company.com"
+                value={testEmailAddress}
+                onChange={(e) => setTestEmailAddress(e.target.value)}
+                autoFocus
+              />
+              <p className="mt-1 text-[11px] text-[#61617a]">
+                Enter your email address. A copy of the test message will be delivered to this inbox.
+              </p>
+            </div>
+
+            {drafts.length > 0 && (
+              <div>
+                <label className={label}>Select Content to Test</label>
+                <select
+                  className={`${input} bg-[#14141d] cursor-pointer`}
+                  value={testDraftId ?? ""}
+                  onChange={(e) => setTestDraftId(e.target.value || null)}
+                >
+                  <option value="">Standard Verification Test Message</option>
+                  {drafts.map((d) => {
+                    const lead = leads.find((l) => l.id === d.lead_id);
+                    return (
+                      <option key={d.id} value={d.id}>
+                        Draft: {d.subject} (For {lead ? `${lead.first_name} at ${lead.company_name}` : "Lead"})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
+
+            {testResult && (
+              <div className="mt-2">
+                {testResult.ok ? (
+                  <Alert tone="info">
+                    <div className="font-medium text-emerald-300 flex items-center gap-1.5">
+                      <span>✅</span> Test Email Sent Successfully!
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-300">
+                      Delivered copy to: <span className="font-mono text-emerald-400">{testResult.recipient}</span>
+                    </div>
+                    {testResult.messageId && (
+                      <div className="mt-0.5 text-[11px] font-mono text-zinc-400 truncate">
+                        Message ID: {testResult.messageId}
+                      </div>
+                    )}
+                    <div className="mt-2 text-xs text-[#9494a8] border-t border-white/10 pt-1.5">
+                      💡 Check your inbox and spam folder. If you received the email, your SMTP configuration is working perfectly!
+                    </div>
+                  </Alert>
+                ) : (
+                  <Alert tone="error">
+                    <div className="font-medium text-rose-300 flex items-center gap-1.5">
+                      <span>❌</span> Test Email Delivery Failed
+                    </div>
+                    <div className="mt-1 text-xs font-mono text-rose-200 bg-black/40 p-2 rounded border border-rose-500/20 overflow-x-auto whitespace-pre-wrap">
+                      {testResult.error}
+                    </div>
+                    <div className="mt-2.5 text-xs text-rose-200/80 space-y-1">
+                      <div className="font-semibold text-rose-300">Troubleshooting Steps:</div>
+                      <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                        <li>Verify <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, and <code>SMTP_PASS</code> in your <code>.env.local</code>.</li>
+                        <li><b>Gmail users:</b> You must create an <i>App Password</i> (Google Account &gt; Security &gt; App passwords) instead of your account password.</li>
+                        <li><b>Port 587 vs 465:</b> 587 uses STARTTLS (`secure: false`), while 465 uses implicit SSL (`secure: true`).</li>
+                      </ul>
+                    </div>
+                  </Alert>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-white/8">
+              <Button
+                variant="ghost"
+                onClick={() => setShowTestModal(false)}
+                disabled={testSending}
+              >
+                Close
+              </Button>
+              <Button
+                onClick={handleSendTestEmail}
+                busy={testSending}
+                disabled={testSending || !testEmailAddress.trim()}
+              >
+                {testSending ? "Sending Test Email…" : "Send Test Email"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
 function Field({ k, v }: { k: string; v: string }) {
   if (!v) return null;
