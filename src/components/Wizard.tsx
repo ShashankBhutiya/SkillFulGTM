@@ -259,7 +259,6 @@ export default function Wizard() {
   const missing = config
     ? [
         !config.database && "DATABASE_URL",
-        !config.database && "DATABASE_URL",
         !config.gemini && "GEMINI_API_KEYS",
         !config.exa && "EXA_API_KEY",
         !config.hunter && "HUNTER_API_KEY",

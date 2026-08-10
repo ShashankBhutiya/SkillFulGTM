@@ -142,7 +142,9 @@ function cellText(value: ExcelJS.CellValue): string {
   }
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   if (typeof value === "object") {
-    const v = value as Record<string, unknown>;
+    // ExcelJS's cell union has no index signature, so widen through unknown
+    // before probing the shape-specific fields below.
+    const v = value as unknown as Record<string, unknown>;
     if (typeof v.hyperlink === "string") return v.hyperlink;
     if (typeof v.text === "string") return v.text;
     if (typeof v.result === "string" || typeof v.result === "number") return String(v.result);

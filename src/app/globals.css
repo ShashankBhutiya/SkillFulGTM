@@ -272,7 +272,105 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   .sk-rise,
   .sk-spin,
-  .sk-pulse {
+  .sk-pulse,
+  .sk-float {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------- site chrome */
+
+@layer components {
+  /* Sticky nav. The blur plus a translucent fill keeps content readable as it
+     scrolls underneath instead of colliding with it. */
+  .sk-nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(14px) saturate(160%);
+    background: rgba(7, 7, 11, 0.72);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.25s, background 0.25s;
+  }
+  .sk-nav[data-stuck="true"] {
+    border-bottom-color: var(--color-line);
+    background: rgba(7, 7, 11, 0.88);
+  }
+
+  .sk-navlink {
+    position: relative;
+    font-size: 0.875rem;
+    color: var(--color-muted);
+    transition: color 0.15s;
+  }
+  .sk-navlink:hover {
+    color: var(--color-ink);
+  }
+  .sk-navlink::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 100%;
+    bottom: -6px;
+    height: 1px;
+    background: linear-gradient(90deg, var(--color-accent), var(--color-cyan));
+    transition: right 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .sk-navlink:hover::after {
+    right: 0;
+  }
+
+  /* Display type for the hero. clamp() keeps it from wrapping badly on phones
+     without needing a separate mobile size. */
+  .sk-display {
+    font-size: clamp(2.1rem, 6vw, 3.65rem);
+    line-height: 1.03;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+  }
+
+  .sk-gradient-text {
+    background: linear-gradient(100deg, #ffffff 10%, #b9a5ff 45%, #6fb2ff 80%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Bordered panel whose edge itself carries the gradient — used for the
+     pipeline strip so it reads as one connected object. */
+  .sk-frame {
+    position: relative;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+    padding: 1px;
+  }
+  .sk-frame > * {
+    border-radius: 17px;
+    background: linear-gradient(180deg, #0d0d14, #0a0a10);
+  }
+
+  .sk-section {
+    scroll-margin-top: 5.5rem;
+  }
+}
+
+@keyframes sk-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+.sk-float {
+  animation: sk-float 5s ease-in-out infinite;
+}
+
+/* Staggers children of a revealed group. */
+.sk-stagger > * {
+  animation: sk-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sk-stagger > *:nth-child(2) { animation-delay: 0.07s; }
+.sk-stagger > *:nth-child(3) { animation-delay: 0.14s; }
+.sk-stagger > *:nth-child(4) { animation-delay: 0.21s; }
+.sk-stagger > *:nth-child(5) { animation-delay: 0.28s; }
