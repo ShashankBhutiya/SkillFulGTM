@@ -41,6 +41,10 @@ export class ExaHunterProvider implements LeadProvider {
 
     for (const company of companies) {
       if (leads.length >= limit) break;
+      if (companiesTried > 0) {
+        // Pacing delay between calls to respect Hunter per-second API limits
+        await new Promise((r) => setTimeout(r, 350));
+      }
       companiesTried += 1;
       try {
         const found = await contactsForDomain(company, filters);
@@ -59,6 +63,7 @@ export class ExaHunterProvider implements LeadProvider {
         if (/429|401/.test(msg)) break;
       }
     }
+
 
     if (!leads.length && companiesTried > 0) {
       warnings.push(

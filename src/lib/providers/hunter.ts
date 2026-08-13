@@ -49,6 +49,7 @@ export type HunterFilters = {
 async function domainSearch(
   domain: string,
   filters: HunterFilters,
+  attempt = 1,
 ): Promise<HunterEmail[]> {
   const url = new URL(`${BASE}/domain-search`);
   url.searchParams.set("domain", domain);
@@ -67,11 +68,32 @@ async function domainSearch(
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as DomainSearchResponse | null;
     const detail = body?.errors?.[0]?.details ?? (await res.text().catch(() => ""));
+    const errorId = (body as { errors?: { id?: string }[] })?.errors?.[0]?.id ?? "";
+
     if (res.status === 401) {
       throw new Error(`Hunter rejected the API key (401). ${detail}`.trim());
     }
     if (res.status === 429) {
-      throw new Error("Hunter rate limit / credit cap hit (429).");
+      const isQuota =
+        errorId === "credits_exceeded" ||
+        /quota|credit|allowance/i.test(detail);
+
+      if (isQuota) {
+        throw new Error(
+          `Hunter monthly search credit cap reached (429). ${detail || "Your monthly quota has been exhausted. Upgrade your Hunter.io plan or wait for the monthly reset."}`,
+        );
+      }
+
+      // If it's a transient per-second rate limit, pause and retry (up to 3 attempts)
+      if (attempt <= 3) {
+        const delay = attempt * 1200;
+        await new Promise((r) => setTimeout(r, delay));
+        return domainSearch(domain, filters, attempt + 1);
+      }
+
+      throw new Error(
+        `Hunter API rate limit exceeded (429). Too many requests per second. ${detail}`,
+      );
     }
     throw new Error(`Hunter error ${res.status}: ${String(detail).slice(0, 200)}`);
   }
@@ -79,6 +101,7 @@ async function domainSearch(
   const data = (await res.json()) as DomainSearchResponse;
   return data.data?.emails ?? [];
 }
+
 
 type VerifyResponse = {
   data?: {

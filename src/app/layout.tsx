@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const inter = Inter({
@@ -48,6 +49,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
+      <head>
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5738225999817138"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
+      </head>
       {/* Content sits above the fixed ambient gradient and grid drawn on <body>. */}
       <body className="min-h-screen antialiased">
         <div className="relative z-10">{children}</div>
