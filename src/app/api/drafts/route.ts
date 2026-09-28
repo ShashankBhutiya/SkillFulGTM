@@ -133,12 +133,25 @@ export async function POST(req: Request) {
 
 /** Edit or approve a single draft. Every field here is meant to be overridden. */
 export async function PATCH(req: Request) {
-  const { draftId, subject, body, approved } = (await req.json()) as {
+  const { draftId, campaignId, approveAll, subject, body, approved } = (await req.json()) as {
     draftId?: string;
+    campaignId?: string;
+    approveAll?: boolean;
     subject?: string;
     body?: string;
     approved?: boolean;
   };
+  if (campaignId && approveAll) {
+    const campaign = await store.getCampaign(campaignId);
+    if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+    await sql(
+      `UPDATE drafts SET approved = TRUE
+       WHERE campaign_id = $1
+       AND lead_id IN (SELECT id FROM leads WHERE campaign_id = $1 AND selected)`,
+      [campaignId],
+    );
+    return NextResponse.json({ ok: true });
+  }
   if (!draftId) return NextResponse.json({ error: "draftId is required" }, { status: 400 });
 
   const draft = await store.getDraft(draftId);

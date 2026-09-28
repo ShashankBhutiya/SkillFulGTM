@@ -4,6 +4,11 @@ Agentic GTM. You describe your company once; the app derives an ideal customer
 profile, finds real people who match it, writes an email for each one, and sends
 from your own mailbox — with a human approval gate before anything leaves.
 
+The template bulk-email path can also import up to 1,000 recipients from CSV,
+merge standard or custom columns into reusable subject/body templates, preview
+every rendered message, and feed approved drafts through the same guarded send
+pipeline. It does not require Gemini, Exa, or Hunter credentials.
+
 ```
 Company description
       │
@@ -63,6 +68,8 @@ provider will rewrite or reject the message.
 | `src/lib/providers/hunter.ts` | Stage 2: a domain → contactable people with emails. |
 | `src/lib/providers/index.ts` | Combines both behind a `LeadProvider` interface — swap the source without touching the agents. |
 | `src/lib/email/` | Compose, suppression, throttle, signed unsubscribe. |
+| `src/app/api/templates/` | Create, update, list, and delete reusable bulk-email templates. |
+| `src/app/api/leads/import/` | Validate and import CSV recipient data and custom merge fields. |
 | `src/lib/db.ts` | Postgres via `pg`. Async throughout — serverless filesystems are read-only and ephemeral, so the suppression list cannot live in a local file. |
 
 ### Models and cost

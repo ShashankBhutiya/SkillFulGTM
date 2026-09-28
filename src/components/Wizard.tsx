@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import BulkEmail from "./BulkEmail";
 import { Alert, Button, Pill, Stat, Steps, card, input, label } from "./ui";
 
 /** Initials bubble, tinted deterministically from the name so rows differ. */
@@ -116,6 +117,8 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 /* -------------------------------------------------------------------------- */
 
 export default function Wizard() {
+  const [workflow, setWorkflow] = useState<"ai" | "bulk">("ai");
+  const [bulkSeed, setBulkSeed] = useState<{ campaignId: string; leads: Lead[] } | null>(null);
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -339,8 +342,27 @@ export default function Wizard() {
       ].filter(Boolean)
     : [];
 
+  if (workflow === "bulk") {
+    return (
+      <BulkEmail
+        config={config}
+        initialCampaignId={bulkSeed?.campaignId ?? null}
+        initialLeads={bulkSeed?.leads ?? []}
+        onSwitchToAi={(updatedLeads) => {
+          if (bulkSeed) setLeads(updatedLeads);
+          setBulkSeed(null);
+          setWorkflow("ai");
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
+      <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-black/20 p-1">
+        <button type="button" className="rounded-lg bg-violet-500/15 px-4 py-2 text-sm font-medium text-violet-200 ring-1 ring-violet-400/25">AI-personalized campaign</button>
+        <button type="button" onClick={() => { setBulkSeed(null); setWorkflow("bulk"); }} className="rounded-lg px-4 py-2 text-sm text-[#9494a8] hover:text-white">Template bulk email</button>
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Steps current={step} />
         <Button
@@ -614,13 +636,25 @@ export default function Wizard() {
                 <span className="font-medium text-[#9d85ff]">{selectedCount}</span> selected
               </div>
             </div>
-            <Button
-              onClick={writeDrafts}
-              busy={busy === "drafts"}
-              disabled={busy !== null || selectedCount === 0}
-            >
-              {busy === "drafts" ? `Writing ${selectedCount} emails…` : "Write emails"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  if (campaignId) setBulkSeed({ campaignId, leads });
+                  setWorkflow("bulk");
+                }}
+                disabled={busy !== null || selectedCount === 0}
+              >
+                Use a template
+              </Button>
+              <Button
+                onClick={writeDrafts}
+                busy={busy === "drafts"}
+                disabled={busy !== null || selectedCount === 0}
+              >
+                {busy === "drafts" ? `Writing ${selectedCount} emails…` : "Write AI emails"}
+              </Button>
+            </div>
           </div>
 
           <div className="-mx-6 overflow-x-auto">

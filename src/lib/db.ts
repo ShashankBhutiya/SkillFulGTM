@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS suppression (
   reason     TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS email_templates (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  subject    TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 /**
@@ -197,6 +206,15 @@ export type DraftRow = {
   created_at: string;
 };
 
+export type EmailTemplateRow = {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
 /* -------------------------------------------------------------------------- */
 /* Queries                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -237,6 +255,17 @@ export const store = {
 
   async getDraft(id: string): Promise<DraftRow | undefined> {
     const rows = await sql<DraftRow>("SELECT * FROM drafts WHERE id = $1", [id]);
+    return rows[0];
+  },
+
+  async listTemplates(): Promise<EmailTemplateRow[]> {
+    return sql<EmailTemplateRow>(
+      "SELECT * FROM email_templates ORDER BY updated_at DESC, created_at DESC",
+    );
+  },
+
+  async getTemplate(id: string): Promise<EmailTemplateRow | undefined> {
+    const rows = await sql<EmailTemplateRow>("SELECT * FROM email_templates WHERE id = $1", [id]);
     return rows[0];
   },
 
