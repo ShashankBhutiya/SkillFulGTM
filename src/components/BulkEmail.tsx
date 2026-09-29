@@ -60,6 +60,13 @@ type Config = {
   publicBaseUrl: boolean;
 };
 
+type ManualColumn = {
+  id: string;
+  name: string;
+  values: string;
+  locked?: boolean;
+};
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -138,6 +145,15 @@ export default function BulkEmail({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [testEmail, setTestEmail] = useState("");
+  const [recipientInputMode, setRecipientInputMode] = useState<"csv" | "columns">("csv");
+  const [importMode, setImportMode] = useState<"replace" | "append">("replace");
+  const [manualColumns, setManualColumns] = useState<ManualColumn[]>([
+    { id: "email", name: "email", values: "", locked: true },
+    { id: "first_name", name: "first_name", values: "", locked: true },
+    { id: "last_name", name: "last_name", values: "", locked: true },
+    { id: "company_name", name: "company_name", values: "", locked: true },
+    { id: "title", name: "title", values: "", locked: true },
+  ]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -177,6 +193,28 @@ export default function BulkEmail({
     setStage(2);
   });
 
+  const submitRecipientRows = async (
+    rows: Record<string, string>[],
+    rowOffset: number,
+  ) => {
+      const data = await api<{
+        leads: Lead[];
+        imported: number;
+        suppressed: number;
+        rejected: { row: number; reason: string }[];
+        fields: string[];
+      }>("/api/leads/import", {
+        method: "POST",
+        body: JSON.stringify({ campaignId, rows, mode: importMode, rowOffset }),
+      });
+      setLeads(data.leads);
+      setFields((current) => [...new Set([...standardFields, ...current, ...data.fields])]);
+      const notes = [`Imported ${data.imported} recipient${data.imported === 1 ? "" : "s"}.`];
+      if (data.suppressed) notes.push(`${data.suppressed} suppressed address${data.suppressed === 1 ? " was" : "es were"} left unselected.`);
+      if (data.rejected.length) notes.push(`${data.rejected.length} invalid or duplicate row${data.rejected.length === 1 ? " was" : "s were"} skipped.`);
+      setNotice(notes.join(" "));
+  };
+
   const importCsv = (file?: File) => {
     if (!file || !campaignId) return;
     run("import", async () => {
@@ -189,24 +227,46 @@ export default function BulkEmail({
       if (parsed.errors.length) {
         throw new Error(`CSV error on row ${parsed.errors[0]!.row ?? "unknown"}: ${parsed.errors[0]!.message}`);
       }
-      const data = await api<{
-        leads: Lead[];
-        imported: number;
-        suppressed: number;
-        rejected: { row: number; reason: string }[];
-        fields: string[];
-      }>("/api/leads/import", {
-        method: "POST",
-        body: JSON.stringify({ campaignId, rows: parsed.data }),
-      });
-      setLeads(data.leads);
-      setFields([...new Set([...standardFields, ...data.fields])]);
-      const notes = [`Imported ${data.imported} recipient${data.imported === 1 ? "" : "s"}.`];
-      if (data.suppressed) notes.push(`${data.suppressed} suppressed address${data.suppressed === 1 ? " was" : "es were"} left unselected.`);
-      if (data.rejected.length) notes.push(`${data.rejected.length} invalid or duplicate row${data.rejected.length === 1 ? " was" : "s were"} skipped.`);
-      setNotice(notes.join(" "));
+      await submitRecipientRows(parsed.data, 2);
     });
   };
+
+  const columnLines = (value: string) => {
+    const lines = value.replace(/\r/g, "").split("\n");
+    while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop();
+    return lines;
+  };
+
+  const manualRowCount = Math.max(0, ...manualColumns.map((column) => columnLines(column.values).length));
+
+  const addManualColumn = () => {
+    const id = `custom_${Date.now()}`;
+    setManualColumns((columns) => [...columns, { id, name: "custom_field", values: "" }]);
+  };
+
+  const updateManualColumn = (id: string, patch: Partial<ManualColumn>) =>
+    setManualColumns((columns) => columns.map((column) => column.id === id ? { ...column, ...patch } : column));
+
+  const removeManualColumn = (id: string) =>
+    setManualColumns((columns) => columns.filter((column) => column.id !== id));
+
+  const importManualColumns = () => run("import-columns", async () => {
+    if (!campaignId) throw new Error("Create a campaign first.");
+    const normalizedNames = manualColumns.map((column) =>
+      column.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""),
+    );
+    if (normalizedNames.some((name) => !name)) throw new Error("Every column needs a name.");
+    if (new Set(normalizedNames).size !== normalizedNames.length) throw new Error("Column names must be unique.");
+    if (!manualRowCount) throw new Error("Paste at least one email address.");
+
+    const valueColumns = manualColumns.map((column) => columnLines(column.values));
+    const rows = Array.from({ length: manualRowCount }, (_, rowIndex) =>
+      Object.fromEntries(
+        normalizedNames.map((name, columnIndex) => [name, valueColumns[columnIndex]?.[rowIndex] ?? ""]),
+      ),
+    );
+    await submitRecipientRows(rows, 1);
+  });
 
   const toggleLead = async (lead: Lead) => {
     const selected = !lead.selected;
@@ -368,15 +428,71 @@ export default function BulkEmail({
       {stage === 2 && (
         <div className="space-y-5">
           <div className={card}>
-            <h2 className="text-lg font-semibold">Import recipients</h2>
-            <p className="mt-1 text-sm text-[#9494a8]">Upload a CSV with an <code>email</code> column. Common columns such as <code>first_name</code>, <code>company_name</code>, and any custom columns become template fields.</p>
-            <label className="mt-5 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-violet-400/35 bg-violet-500/5 px-6 py-10 text-center hover:bg-violet-500/10">
-              <span>
-                <span className="block font-medium text-violet-200">{busy === "import" ? "Importing…" : "Choose CSV file"}</span>
-                <span className="mt-1 block text-xs text-[#77778c]">Up to 1,000 rows. A new import replaces the current recipient list.</span>
-              </span>
-              <input type="file" accept=".csv,text/csv" className="hidden" disabled={busy !== null} onChange={(event) => importCsv(event.target.files?.[0])} />
-            </label>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">Add recipients</h2>
+                <p className="mt-1 text-sm text-[#9494a8]">Upload a complete CSV or paste data one column at a time. Every column becomes an available template field.</p>
+              </div>
+              <div className="min-w-44">
+                <label className={label}>When importing</label>
+                <select className={input} value={importMode} onChange={(event) => setImportMode(event.target.value as "append" | "replace")}>
+                  <option value="replace">Replace current list</option>
+                  <option value="append">Append to current list</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 rounded-xl border border-white/10 bg-black/20 p-1">
+              <button type="button" onClick={() => setRecipientInputMode("csv")} className={`rounded-lg px-4 py-2 text-sm transition ${recipientInputMode === "csv" ? "bg-violet-500/15 font-medium text-violet-200 ring-1 ring-violet-400/25" : "text-[#9494a8] hover:text-white"}`}>Upload CSV</button>
+              <button type="button" onClick={() => setRecipientInputMode("columns")} className={`rounded-lg px-4 py-2 text-sm transition ${recipientInputMode === "columns" ? "bg-violet-500/15 font-medium text-violet-200 ring-1 ring-violet-400/25" : "text-[#9494a8] hover:text-white"}`}>Paste by column</button>
+            </div>
+
+            {recipientInputMode === "csv" && (
+              <label className="mt-5 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-violet-400/35 bg-violet-500/5 px-6 py-10 text-center hover:bg-violet-500/10">
+                <span>
+                  <span className="block font-medium text-violet-200">{busy === "import" ? "Importing…" : "Choose CSV file"}</span>
+                  <span className="mt-1 block text-xs text-[#77778c]">Requires an email column · up to 1,000 recipients</span>
+                </span>
+                <input type="file" accept=".csv,text/csv" className="hidden" disabled={busy !== null} onChange={(event) => importCsv(event.target.files?.[0])} />
+              </label>
+            )}
+
+            {recipientInputMode === "columns" && (
+              <div className="mt-5">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-medium">Paste one value per line</h3>
+                    <p className="text-xs text-[#77778c]">Line 1 in every column forms recipient 1, line 2 forms recipient 2, and so on. Shorter optional columns are filled with blanks.</p>
+                  </div>
+                  <div className="flex items-center gap-2"><Pill tone="neutral">{manualRowCount} aligned row{manualRowCount === 1 ? "" : "s"}</Pill><Button variant="ghost" onClick={addManualColumn}>Add custom column</Button></div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {manualColumns.map((column) => {
+                    const count = columnLines(column.values).length;
+                    return (
+                      <div key={column.id} className="rounded-xl border border-white/8 bg-black/20 p-3">
+                        <div className="mb-2 flex items-center gap-2">
+                          {column.locked ? (
+                            <code className="min-w-0 flex-1 truncate text-xs text-violet-200">{column.name}{column.name === "email" ? " *" : ""}</code>
+                          ) : (
+                            <input className={`${input} min-w-0 flex-1 py-1.5 font-mono text-xs`} value={column.name} onChange={(event) => updateManualColumn(column.id, { name: event.target.value })} placeholder="custom_field" />
+                          )}
+                          <span className="shrink-0 text-[11px] text-[#61617a]">{count} value{count === 1 ? "" : "s"}</span>
+                          {!column.locked && <button type="button" onClick={() => removeManualColumn(column.id)} className="rounded px-1.5 py-1 text-xs text-rose-300 hover:bg-rose-500/10" aria-label={`Remove ${column.name} column`}>×</button>}
+                        </div>
+                        <textarea className={`${input} h-36 resize-y whitespace-pre font-mono text-xs leading-6`} value={column.values} onChange={(event) => updateManualColumn(column.id, { values: event.target.value })} placeholder={column.name === "email" ? "alex@example.com\nsam@example.com" : "Value for recipient 1\nValue for recipient 2"} />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-[#77778c]">Column names are normalized to merge tags, for example <code>Industry Type</code> becomes <code>{"{{industry_type}}"}</code>.</p>
+                  <Button onClick={importManualColumns} busy={busy === "import-columns"} disabled={!manualRowCount}>Import {manualRowCount || ""} row{manualRowCount === 1 ? "" : "s"}</Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {leads.length > 0 && (

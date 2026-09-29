@@ -9,6 +9,10 @@ merge standard or custom columns into reusable subject/body templates, preview
 every rendered message, and feed approved drafts through the same guarded send
 pipeline. It does not require Gemini, Exa, or Hunter credentials.
 
+Recipients can also be entered column by column: paste newline-separated values
+from Excel or Sheets into standard fields, add custom columns, and append them
+to or replace the current campaign list. Lines stay aligned across columns.
+
 ```
 Company description
       │
