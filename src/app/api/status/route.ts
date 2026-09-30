@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { configStatus } from "@/lib/env";
 import { store } from "@/lib/db";
@@ -6,7 +7,7 @@ import { getMailbox } from "@/lib/mailbox";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export const GET = apiRoute(async function GET() {
   const user = await currentUser();
   if (!user) return unauthorized();
   const config = configStatus();
@@ -33,4 +34,4 @@ export async function GET() {
       createdAt: c.created_at,
     })),
   });
-}
+});

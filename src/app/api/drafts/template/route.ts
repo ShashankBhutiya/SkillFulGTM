@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { newId, store, tx } from "@/lib/db";
 import { fieldsForLead, renderTemplate } from "@/lib/email/template";
@@ -5,7 +6,7 @@ import { currentUser, unauthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { campaignId, subject, body, templateName, previewOnly = false } = (await req.json()) as {
@@ -64,4 +65,4 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ previews, drafts: previewOnly ? undefined : await store.listDrafts(user.id, campaign.id) });
-}
+});

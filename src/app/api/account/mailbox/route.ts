@@ -1,22 +1,34 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { currentUser, hasValidOrigin, unauthorized } from "@/lib/auth";
 import { sql } from "@/lib/db";
 import { assertPublicSmtpHost, encryptSecret, getMailbox, publicMailbox } from "@/lib/mailbox";
 import { verifyTransport } from "@/lib/email/sender";
+import { env } from "@/lib/env";
+import { mailboxInput } from "@/lib/mailbox-input";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export const GET = apiRoute(async function GET() {
   const user = await currentUser();
   if (!user) return unauthorized();
   return NextResponse.json({ mailbox: publicMailbox(await getMailbox(user.id)) });
-}
+});
 
-export async function PUT(req: Request) {
+export const PUT = apiRoute(async function PUT(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   if (!(await hasValidOrigin(req))) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const input = (await req.json()) as Record<string, unknown>;
+  try {
+    env.credentialsEncryptionKey;
+  } catch {
+    return NextResponse.json({ error: "Mailbox storage is not configured. Set CREDENTIALS_ENCRYPTION_KEY in the server environment and restart the server." }, { status: 503 });
+  }
+  const parsed = mailboxInput.safeParse(await req.json());
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.issues.map((issue) => issue.message).join(" ") }, { status: 400 });
+  }
+  const input = parsed.data;
   const existing = await getMailbox(user.id);
   const host = String(input.host ?? "").trim();
   const port = Number(input.port);
@@ -24,14 +36,12 @@ export async function PUT(req: Request) {
   const fromEmail = String(input.fromEmail ?? "").trim().toLowerCase();
   const postalAddress = String(input.postalAddress ?? "").trim();
   const password = String(input.password ?? "");
-  const maxSends = Math.max(1, Math.min(1000, Number(input.maxSendsPerDay) || 40));
-  const secondsBetween = Math.max(1, Math.min(3600, Number(input.secondsBetween) || 45));
-  const allowedPorts = new Set([465, 587, 2525]);
-  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!host || !allowedPorts.has(port) || !username || !emailPattern.test(fromEmail) || (input.replyTo && !emailPattern.test(String(input.replyTo).trim())) || !postalAddress) {
-    return NextResponse.json({ error: "Host, port, username, from email, and postal address are required." }, { status: 400 });
-  }
+  const maxSends = input.maxSendsPerDay;
+  const secondsBetween = input.secondsBetween;
   if (!password && !existing) return NextResponse.json({ error: "SMTP password is required." }, { status: 400 });
+  if (!password && existing && (host !== existing.host || username !== existing.username)) {
+    return NextResponse.json({ error: "Enter the SMTP password again when changing the host or username." }, { status: 400 });
+  }
   try {
     await assertPublicSmtpHost(host);
   } catch (error) {
@@ -51,9 +61,9 @@ export async function PUT(req: Request) {
       fromEmail, String(input.replyTo ?? "").trim(), postalAddress, maxSends, secondsBetween],
   );
   return NextResponse.json({ mailbox: publicMailbox(await getMailbox(user.id)) });
-}
+});
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   if (!(await hasValidOrigin(req))) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
@@ -62,16 +72,13 @@ export async function POST(req: Request) {
   const result = await verifyTransport(mailbox);
   if (!result.ok) return NextResponse.json({ error: `Connection failed: ${result.error}` }, { status: 502 });
   await sql("UPDATE mailboxes SET verified_at = now(), updated_at = now() WHERE user_id = $1", [user.id]);
-  if (mailbox.from_email.toLowerCase() === user.email.toLowerCase()) {
-    await sql("UPDATE users SET email_verified = TRUE WHERE id = $1", [user.id]);
-  }
   return NextResponse.json({ ok: true, mailbox: publicMailbox(await getMailbox(user.id)) });
-}
+});
 
-export async function DELETE(req: Request) {
+export const DELETE = apiRoute(async function DELETE(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   if (!(await hasValidOrigin(req))) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   await sql("DELETE FROM mailboxes WHERE user_id = $1", [user.id]);
   return NextResponse.json({ ok: true });
-}
+});

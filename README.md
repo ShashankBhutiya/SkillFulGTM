@@ -145,8 +145,13 @@ data, and web-sourced contacts do not by themselves give you one.
   filters are too tight; loosen them on the ICP screen and re-run.
 - **Sending runs as a durable background job.** Pacing means a batch outlives an
   HTTP request, so `/api/send` stores progress in Postgres and the UI polls it.
-  Renewable worker leases let another instance resume after a restart, while
-  recorded draft attempts prevent duplicate delivery.
+  Renewable worker leases let another instance resume when the progress page
+  polls after a restart. Successful sends are excluded from subsequent batches;
+  failed and skipped recipients can be retried. Only one campaign per mailbox
+  runs at a time. This currently depends on progress polling and a running Node
+  process; unattended serverless delivery needs a scheduled queue worker.
+  SMTP acceptance and the database write cannot be committed atomically, so a
+  process crash between them can still leave an uncertain delivery outcome.
 - **Low-confidence drafts are flagged.** The copy agent is instructed to
   personalize only from data it actually has, and to mark a draft `low` when all
   it had was a job title. Read those before approving — a fabricated detail is
@@ -158,4 +163,5 @@ data, and web-sourced contacts do not by themselves give you one.
 npm run dev        # dev server
 npm run build      # production build
 npm run typecheck  # tsc --noEmit
+npm test           # account, mailbox, and failure-path regression checks
 ```

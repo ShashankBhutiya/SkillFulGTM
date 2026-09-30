@@ -113,6 +113,8 @@ export async function registerUser(name: string, email: string, password: string
   const normalized = email.trim().toLowerCase();
   const passwordHash = await hashPassword(password);
   return tx(async (client) => {
+    // Serialize the legacy ownership migration if two signups arrive together.
+    await client.query("SELECT pg_advisory_xact_lock(71029001)");
     const count = await client.query<{ n: string }>("SELECT COUNT(*) AS n FROM users");
     const firstUser = Number(count.rows[0]?.n ?? 0) === 0;
     const result = await client.query<UserRow>(

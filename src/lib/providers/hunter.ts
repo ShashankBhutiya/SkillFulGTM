@@ -134,10 +134,14 @@ export type VerifyVerdict = {
 export async function verifyEmail(email: string): Promise<VerifyVerdict> {
   const url = new URL(`${BASE}/email-verifier`);
   url.searchParams.set("email", email);
-  url.searchParams.set("api_key", env.hunterKey);
 
   try {
-    const res = await fetch(url, { headers: { accept: "application/json" } });
+    if (!process.env.HUNTER_API_KEY?.trim()) {
+      // Imported template recipients do not require an enrichment provider.
+      return { deliverable: true, unknown: true, detail: "No address verifier configured; using the imported address." };
+    }
+    url.searchParams.set("api_key", env.hunterKey);
+    const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
     const body = (await res.json().catch(() => null)) as VerifyResponse | null;
 
     if (!res.ok) {
@@ -163,6 +167,7 @@ export async function verifyEmail(email: string): Promise<VerifyVerdict> {
       // skipped unless the operator explicitly opts in.
       return unverifiable(`unverifiable (${status}) — domain accepts all addresses`);
     }
+    if (result !== "deliverable") return unverifiable(`unverifiable (${status})`);
     return { deliverable: true, unknown: false, detail: status };
   } catch (err) {
     return unverifiable(

@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { verifyTransport, sendTestEmail } from "@/lib/email/sender";
 import { store } from "@/lib/db";
@@ -6,7 +7,7 @@ import { getMailbox } from "@/lib/mailbox";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   if (!user.email_verified) return NextResponse.json({ error: "Verify your account email before sending tests." }, { status: 403 });
@@ -94,4 +95,4 @@ export async function POST(req: Request) {
       { status: 500 },
     );
   }
-}
+});

@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { newId, sql, store, tx } from "@/lib/db";
 import { leadProvider } from "@/lib/providers";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /** Step 2 — run the ICP's sourcing plan (Exa → Hunter) and store the matches. */
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { campaignId, limit = 25 } = (await req.json()) as {
@@ -79,10 +80,10 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-}
+});
 
 /** Include or exclude a lead from the batch. */
-export async function PATCH(req: Request) {
+export const PATCH = apiRoute(async function PATCH(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { leadId, selected } = (await req.json()) as {
@@ -106,4 +107,4 @@ export async function PATCH(req: Request) {
     [Boolean(selected), leadId, user.id],
   );
   return NextResponse.json({ ok: true });
-}
+});

@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { newId, sql } from "@/lib/db";
 import { currentUser, unauthorized } from "@/lib/auth";
@@ -5,7 +6,7 @@ import { currentUser, unauthorized } from "@/lib/auth";
 export const runtime = "nodejs";
 
 /** Starts a template-only campaign without spending AI or sourcing credits. */
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { name } = (await req.json()) as { name?: string };
@@ -24,4 +25,4 @@ export async function POST(req: Request) {
     [id, user.id, campaignName, JSON.stringify({ name: campaignName, mode: "template" })],
   );
   return NextResponse.json({ campaignId: id });
-}
+});

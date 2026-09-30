@@ -13,6 +13,7 @@ function transport(s: MailboxConfig): Transporter {
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 30_000,
+    requireTLS: !s.secure,
   });
 }
 
@@ -91,7 +92,7 @@ export async function sendBatch(
 ): Promise<SendOutcome[]> {
   const outcomes: SendOutcome[] = [];
   const s = mailbox;
-  const from = s.from_name ? `"${s.from_name}" <${s.from_email}>` : s.from_email;
+  const from = { name: s.from_name, address: s.from_email };
 
   let budget = s.max_sends_per_day - (await store.sendsInLastDay(userId));
 
@@ -188,7 +189,7 @@ export async function sendTestEmail({
   firstName?: string;
 }): Promise<{ ok: boolean; messageId?: string; error?: string }> {
   const s = mailbox;
-  const from = s.from_name ? `"${s.from_name}" <${s.from_email}>` : s.from_email;
+  const from = { name: s.from_name, address: s.from_email };
 
   const { text, html, unsubscribeUrl } = compose({
     firstName,

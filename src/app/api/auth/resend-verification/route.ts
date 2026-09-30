@@ -1,8 +1,9 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { currentUser, hasValidOrigin, unauthorized } from "@/lib/auth";
 import { issueAuthToken, sendAuthEmail } from "@/lib/auth-mail";
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   if (!(await hasValidOrigin(req))) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
@@ -11,4 +12,4 @@ export async function POST(req: Request) {
     await sendAuthEmail(user.email, "verify", token);
   }
   return NextResponse.json({ ok: true });
-}
+});

@@ -1,6 +1,7 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { currentUser, unauthorized } from "@/lib/auth";
-import { sql, store, type DraftRow, type LeadRow } from "@/lib/db";
+import { sql, tx, store, type DraftRow, type LeadRow } from "@/lib/db";
 import { env } from "@/lib/env";
 import { getMailbox, type MailboxConfig } from "@/lib/mailbox";
 import { sendBatch, verifyTransport, type SendOutcome } from "@/lib/email/sender";
@@ -43,7 +44,7 @@ async function remainingDrafts(userId: string, campaignId: string) {
      JOIN leads l ON l.id = d.lead_id
      JOIN campaigns c ON c.id = d.campaign_id
      WHERE d.campaign_id = $1 AND c.user_id = $2 AND d.approved AND l.selected AND l.email <> ''
-       AND NOT EXISTS (SELECT 1 FROM sends s WHERE s.draft_id = d.id)
+       AND NOT EXISTS (SELECT 1 FROM sends s WHERE s.draft_id = d.id AND s.status = 'sent')
      ORDER BY d.seq`,
     [campaignId, userId],
   );
@@ -56,12 +57,20 @@ function launchWorker(userId: string, campaignId: string, mailbox: MailboxConfig
   const leaseSeconds = Math.max(180, mailbox.seconds_between + 120);
 
   void (async () => {
-    const claimed = await sql(
-      `UPDATE send_jobs SET lease_until = now() + ($3 * interval '1 second'), updated_at = now()
-       WHERE user_id = $1 AND campaign_id = $2 AND status = 'running'
-         AND (lease_until IS NULL OR lease_until < now()) RETURNING 1`,
-      [userId, campaignId, leaseSeconds],
-    );
+    const claimed = await tx(async (client) => {
+      // One active campaign per mailbox keeps pacing and daily limits consistent.
+      await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+      const result = await client.query(
+        `UPDATE send_jobs SET lease_until = now() + ($3 * interval '1 second'), updated_at = now()
+         WHERE user_id = $1 AND campaign_id = $2 AND status = 'running'
+           AND (lease_until IS NULL OR lease_until < now())
+           AND NOT EXISTS (SELECT 1 FROM send_jobs other WHERE other.user_id = $1
+             AND other.campaign_id <> $2 AND other.status = 'running' AND other.lease_until > now())
+         RETURNING 1`,
+        [userId, campaignId, leaseSeconds],
+      );
+      return result.rows;
+    });
     if (!claimed.length) return;
 
     const drafts = await remainingDrafts(userId, campaignId);
@@ -101,7 +110,7 @@ function launchWorker(userId: string, campaignId: string, mailbox: MailboxConfig
   }).finally(() => localWorkers.delete(workerKey));
 }
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   if (!user.email_verified) return NextResponse.json({ error: "Verify your account email before sending." }, { status: 403 });
@@ -125,19 +134,22 @@ export async function POST(req: Request) {
   const check = await verifyTransport(mailbox);
   if (!check.ok) return NextResponse.json({ error: `SMTP connection failed: ${check.error}` }, { status: 502 });
 
-  await sql(
+  const opened = await sql(
     `INSERT INTO send_jobs (user_id, campaign_id, status, total, done, outcomes, error, started_at, updated_at, lease_until)
      VALUES ($1,$2,'running',$3,0,'[]'::jsonb,'',now(),now(),NULL)
      ON CONFLICT (user_id, campaign_id) DO UPDATE SET status='running', total=excluded.total,
-       done=0, outcomes='[]'::jsonb, error='', started_at=now(), updated_at=now(), lease_until=NULL`,
+       done=0, outcomes='[]'::jsonb, error='', started_at=now(), updated_at=now(), lease_until=NULL
+       WHERE send_jobs.status <> 'running' OR send_jobs.lease_until < now()
+       RETURNING 1`,
     [user.id, campaign.id, drafts.length],
   );
+  if (!opened.length) return NextResponse.json({ error: "A send is already queued or running for this campaign." }, { status: 409 });
   await sql("UPDATE campaigns SET status = 'sending' WHERE id = $1 AND user_id = $2", [campaign.id, user.id]);
   launchWorker(user.id, campaign.id, mailbox);
   return NextResponse.json({ started: true, total: drafts.length, pacing: `${mailbox.seconds_between}s between messages, max ${mailbox.max_sends_per_day}/day` });
-}
+});
 
-export async function GET(req: Request) {
+export const GET = apiRoute(async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const campaignId = new URL(req.url).searchParams.get("campaignId");
@@ -146,4 +158,4 @@ export async function GET(req: Request) {
   const mailbox = await getMailbox(user.id);
   if (mailbox) launchWorker(user.id, campaignId, mailbox);
   return NextResponse.json({ job: await jobFor(user.id, campaignId), sentToday: await store.sendsInLastDay(user.id), dailyCap: mailbox?.max_sends_per_day ?? 0 });
-}
+});

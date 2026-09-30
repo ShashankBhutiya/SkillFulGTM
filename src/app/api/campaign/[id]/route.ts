@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { store } from "@/lib/db";
 import { currentUser, unauthorized } from "@/lib/auth";
@@ -5,7 +6,7 @@ import { currentUser, unauthorized } from "@/lib/auth";
 export const runtime = "nodejs";
 
 /** Full campaign state — the client rehydrates from this on load and after edits. */
-export async function GET(
+export const GET = apiRoute(async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -31,4 +32,4 @@ export async function GET(
     leads,
     drafts,
   });
-}
+});

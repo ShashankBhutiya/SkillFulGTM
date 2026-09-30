@@ -34,7 +34,7 @@ export async function sendAuthEmail(to: string, kind: "verify" | "reset", token:
     return;
   }
   const url = link(kind, token);
-  await nodemailer.createTransport({ host: config.host, port: config.port, secure: config.secure, auth: { user: config.user, pass: config.pass } }).sendMail({
+  await nodemailer.createTransport({ host: config.host, port: config.port, secure: config.secure, auth: { user: config.user, pass: config.pass }, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000, requireTLS: !config.secure }).sendMail({
     from: config.from,
     to,
     subject: kind === "verify" ? "Verify your SkillfulGTM account" : "Reset your SkillfulGTM password",

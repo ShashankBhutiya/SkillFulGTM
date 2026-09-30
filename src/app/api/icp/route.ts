@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { generateIcp } from "@/lib/agents/icp";
 import { describeError } from "@/lib/gemini";
@@ -9,7 +10,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /** Step 1 — turn a company description into an ICP and open a campaign. */
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const parsed = CompanyInput.safeParse(await req.json());
@@ -34,10 +35,10 @@ export async function POST(req: Request) {
   } catch (err) {
     return NextResponse.json({ error: describeError(err) }, { status: 500 });
   }
-}
+});
 
 /** Saves a hand-edited ICP back onto the campaign. */
-export async function PATCH(req: Request) {
+export const PATCH = apiRoute(async function PATCH(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { campaignId, icp } = (await req.json()) as { campaignId?: string; icp?: unknown };
@@ -54,4 +55,4 @@ export async function PATCH(req: Request) {
     user.id,
   ]);
   return NextResponse.json({ ok: true });
-}
+});

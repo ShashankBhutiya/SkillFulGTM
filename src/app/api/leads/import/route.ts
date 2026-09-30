@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { newId, sql, store, tx } from "@/lib/db";
 import { normalizeFieldName } from "@/lib/email/template";
@@ -24,7 +25,7 @@ function pick(row: Record<string, string>, field: keyof typeof aliases): string 
   return "";
 }
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { campaignId, rows, mode = "replace", rowOffset = 2 } = (await req.json()) as {
@@ -129,4 +130,4 @@ export async function POST(req: Request) {
     rejected,
     fields: [...new Set(accepted.flatMap(({ normalized }) => Object.keys(normalized)))].sort(),
   });
-}
+});

@@ -1,3 +1,4 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { draftEmail } from "@/lib/agents/draft";
 import { describeError } from "@/lib/gemini";
@@ -42,7 +43,7 @@ async function mapLimit<T, R>(
 }
 
 /** Step 3 — write one email per selected lead. */
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { campaignId, redraft } = (await req.json()) as {
@@ -132,10 +133,10 @@ export async function POST(req: Request) {
     drafts: await store.listDrafts(user.id, campaign.id),
     failures,
   });
-}
+});
 
 /** Edit or approve a single draft. Every field here is meant to be overridden. */
-export async function PATCH(req: Request) {
+export const PATCH = apiRoute(async function PATCH(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { draftId, campaignId, approveAll, subject, body, approved } = (await req.json()) as {
@@ -173,4 +174,4 @@ export async function PATCH(req: Request) {
   ]);
 
   return NextResponse.json({ ok: true });
-}
+});

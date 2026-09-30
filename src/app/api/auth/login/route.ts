@@ -1,13 +1,17 @@
+import { apiRoute, jsonObject } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { createSession, findUserByEmail, hasValidOrigin, setSessionCookie, verifyPassword } from "@/lib/auth";
 import { sql } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   if (!(await hasValidOrigin(req))) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const { email, password } = (await req.json()) as Record<string, string>;
-  const normalized = email?.trim().toLowerCase() ?? "";
+  const { email, password } = await jsonObject(req);
+  if (typeof email !== "string" || typeof password !== "string" || !email.trim() || email.length > 254 || !password || password.length > 200) {
+    return NextResponse.json({ error: "Enter your email address and password." }, { status: 400 });
+  }
+  const normalized = email.trim().toLowerCase();
   await sql("DELETE FROM login_attempts WHERE attempted_at <= now() - interval '1 day'");
   const attempts = await sql<{ n: string }>(
     "SELECT COUNT(*) AS n FROM login_attempts WHERE email = $1 AND attempted_at > now() - interval '15 minutes'",
@@ -25,4 +29,4 @@ export async function POST(req: Request) {
   const response = NextResponse.json({ user: { id: user.id, email: user.email, name: user.name } });
   setSessionCookie(response, await createSession(user.id));
   return response;
-}
+});

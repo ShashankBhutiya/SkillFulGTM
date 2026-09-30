@@ -323,10 +323,18 @@ export default function Wizard() {
   const startSending = () =>
     run("send", async () => {
       await api("/api/send", { method: "POST", body: JSON.stringify({ campaignId }) });
+      if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
-        const d = await api<{ job: SendJob | null }>(`/api/send?campaignId=${campaignId}`);
-        setJob(d.job);
-        if (d.job && !d.job.running && pollRef.current) clearInterval(pollRef.current);
+        try {
+          const d = await api<{ job: SendJob | null }>(`/api/send?campaignId=${campaignId}`);
+          setJob(d.job);
+          if (d.job && !d.job.running && pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+        } catch (error) {
+          setError(error instanceof Error ? error.message : "Could not read sending progress.");
+        }
       }, 3000);
     });
 

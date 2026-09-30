@@ -381,8 +381,9 @@ export default function BulkEmail({
         setError(err instanceof Error ? err.message : String(err));
       }
     };
-    await poll();
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(poll, 3000);
+    await poll();
   });
 
   const selectedCount = leads.filter((lead) => lead.selected).length;

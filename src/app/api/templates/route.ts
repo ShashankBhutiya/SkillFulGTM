@@ -1,14 +1,15 @@
+import { apiRoute } from "@/lib/api-route";
 import { NextResponse } from "next/server";
 import { newId, sql, store } from "@/lib/db";
 import { currentUser, unauthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export const GET = apiRoute(async function GET() {
   const user = await currentUser();
   if (!user) return unauthorized();
   return NextResponse.json({ templates: await store.listTemplates(user.id) });
-}
+});
 
 function validate(input: { name?: string; subject?: string; body?: string }) {
   const name = input.name?.trim() ?? "";
@@ -21,7 +22,7 @@ function validate(input: { name?: string; subject?: string; body?: string }) {
   return { name, subject, body };
 }
 
-export async function POST(req: Request) {
+export const POST = apiRoute(async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const valid = validate(await req.json());
@@ -35,9 +36,9 @@ export async function POST(req: Request) {
     valid.body,
   ]);
   return NextResponse.json({ template: await store.getTemplate(user.id, id) });
-}
+});
 
-export async function PATCH(req: Request) {
+export const PATCH = apiRoute(async function PATCH(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const input = (await req.json()) as { id?: string; name?: string; subject?: string; body?: string };
@@ -51,13 +52,13 @@ export async function PATCH(req: Request) {
     [valid.name, valid.subject, valid.body, input.id, user.id],
   );
   return NextResponse.json({ template: await store.getTemplate(user.id, input.id) });
-}
+});
 
-export async function DELETE(req: Request) {
+export const DELETE = apiRoute(async function DELETE(req: Request) {
   const user = await currentUser();
   if (!user) return unauthorized();
   const { id } = (await req.json()) as { id?: string };
   if (!id) return NextResponse.json({ error: "Template id is required." }, { status: 400 });
   await sql("DELETE FROM email_templates WHERE id = $1 AND user_id = $2", [id, user.id]);
   return NextResponse.json({ ok: true });
-}
+});

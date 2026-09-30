@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { Alert, Button, input, label } from "./ui";
+import { responseJson } from "@/lib/client-api";
 
 export default function RecoveryForm({ token }: { token?: string }) {
   const [email, setEmail] = useState("");
@@ -10,12 +11,16 @@ export default function RecoveryForm({ token }: { token?: string }) {
   const [result, setResult] = useState<{ error?: string; ok?: string } | null>(null);
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setResult(null);
-    const endpoint = token ? "/api/auth/reset-password" : "/api/auth/forgot-password";
-    const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(token ? { token, password } : { email }) });
-    const data = (await response.json()) as { error?: string };
-    setBusy(false);
-    if (!response.ok) return setResult({ error: data.error ?? "Request failed." });
-    setResult({ ok: token ? "Password changed. You can now sign in." : "If that account exists, a reset link has been sent." });
+    try {
+      const endpoint = token ? "/api/auth/reset-password" : "/api/auth/forgot-password";
+      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(token ? { token, password } : { email }) });
+      await responseJson(response);
+      setResult({ ok: token ? "Password changed. You can now sign in." : "If that account exists, a reset link has been sent." });
+    } catch (error) {
+      setResult({ error: error instanceof Error ? error.message : "Request failed. Please try again." });
+    } finally {
+      setBusy(false);
+    }
   }
   return <form onSubmit={submit} className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#11111a]/90 p-7">
     <h1 className="text-2xl font-semibold">{token ? "Choose a new password" : "Reset your password"}</h1>

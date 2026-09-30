@@ -3,11 +3,12 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Alert, input, label } from "./ui";
+import { responseJson } from "@/lib/client-api";
 
-export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
+export default function AuthForm({ mode, initialError = "" }: { mode: "login" | "signup"; initialError?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,7 +23,7 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
       setError("Enter a valid email address.");
       return;
     }
-    if (password.length < 12) {
+    if (mode === "signup" && password.length < 12) {
       setError("Your password must contain at least 12 characters.");
       return;
     }
@@ -34,9 +35,8 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password }),
       });
-      const data = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(data.error ?? "Could not continue.");
-      router.push(mode === "signup" ? "/account?welcome=1" : "/#app");
+      const data = await responseJson<{ warning?: string }>(response);
+      router.push(mode === "signup" ? `/account?welcome=1${data.warning ? "&deliveryFailed=1" : ""}` : "/#app");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
