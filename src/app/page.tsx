@@ -3,11 +3,13 @@ import SiteHeader from "@/components/site/SiteHeader";
 import Hero from "@/components/site/Hero";
 import Guardrails from "@/components/site/Guardrails";
 import SiteFooter from "@/components/site/SiteFooter";
+import { currentUser } from "@/lib/auth";
 
-export default function Home() {
+export default async function Home() {
+  const user = await currentUser();
   return (
     <>
-      <SiteHeader />
+      <SiteHeader user={user ? { name: user.name, email: user.email } : null} />
       <Hero />
       <Guardrails />
 
@@ -22,7 +24,13 @@ export default function Home() {
               Four steps. You can edit the output of every one before moving on.
             </p>
           </div>
-          <Wizard />
+          {user ? <Wizard /> : (
+            <div className="sk-card mx-auto max-w-xl p-8 text-center">
+              <h3 className="text-xl font-semibold">Your outbound workspace</h3>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#9494a8]">Create a private account, connect your own mailbox, and keep every campaign, recipient, and template isolated from other users.</p>
+              <div className="mt-6 flex flex-wrap justify-center gap-3"><a href="/signup" className="sk-btn sk-btn-primary">Create free account</a><a href="/login" className="sk-btn sk-btn-ghost">Sign in</a></div>
+            </div>
+          )}
         </div>
       </section>
 

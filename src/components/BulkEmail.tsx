@@ -55,6 +55,7 @@ type SendJob = {
 type Config = {
   database: boolean;
   databasePooled: boolean;
+  credentialsEncryption: boolean;
   smtp: boolean;
   compliance: boolean;
   publicBaseUrl: boolean;
@@ -390,8 +391,9 @@ export default function BulkEmail({
   const missingConfig = config
     ? [
         !config.database && "DATABASE_URL",
-        !config.smtp && "SMTP settings",
-        !config.compliance && "UNSUBSCRIBE_SECRET / SENDER_POSTAL_ADDRESS",
+        !config.credentialsEncryption && "CREDENTIALS_ENCRYPTION_KEY",
+        !config.smtp && "verified sending mailbox",
+        !config.compliance && "unsubscribe secret / sender postal address",
       ].filter(Boolean)
     : [];
 

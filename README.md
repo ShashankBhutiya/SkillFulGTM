@@ -45,10 +45,14 @@ npm run dev
 | `GEMINI_API_KEYS` | aistudio.google.com/apikey — one key, or several comma-separated |
 | `EXA_API_KEY` | dashboard.exa.ai |
 | `HUNTER_API_KEY` | hunter.io → API |
-| `SMTP_*` | Your mail provider (see below) |
-| `SENDER_POSTAL_ADDRESS` | Your real business address — legally required in the footer |
+| `CREDENTIALS_ENCRYPTION_KEY` | A stable 32+ byte secret used to encrypt user mailbox credentials |
+| `AUTH_SMTP_*` | Platform mailbox used only for verification and password-reset email |
 
 Open http://localhost:3000.
+
+After creating an account, each user connects their own sending mailbox under
+**Account settings**. Campaign SMTP credentials are encrypted at rest and are
+never sent back to the browser.
 
 ### SMTP for common providers
 
@@ -58,8 +62,8 @@ Open http://localhost:3000.
 | Microsoft 365 | `smtp.office365.com` | 587 | Account or app password |
 | Zoho Mail | `smtp.zoho.com` | 587 | App-specific password |
 
-`SMTP_FROM` must usually match `SMTP_USER` or be a verified alias, or the
-provider will rewrite or reject the message.
+The From address must usually match the SMTP username or be a verified alias,
+or the provider will rewrite or reject the message.
 
 ## How the pieces fit
 
@@ -102,12 +106,22 @@ options:
 - **Opt-out happens on POST, not GET.** Corporate security scanners follow every
   link in an inbound email; an unsubscribe that fires on GET silently opts out
   people who never clicked.
-- **Suppression list** checked before every send and enforced across campaigns.
-- **Throttle** — `MAX_SENDS_PER_DAY` and `SECONDS_BETWEEN_SENDS`. A domain with
+- **Per-user suppression list** checked before every send and enforced across that user's campaigns.
+- **Per-user throttle** — configured under Account settings. A domain with
   no sending history should start near 20/day and ramp over about four weeks.
   The defaults here (40/day, 45s apart) assume a warmed domain.
-- **Physical postal address** in the footer. `SENDER_POSTAL_ADDRESS` is required
-  and the app refuses to send without it.
+- **Physical postal address** in the footer. Every user must configure one and
+  verify their mailbox before the app will send.
+
+## Accounts and data isolation
+
+- Email/password accounts use scrypt password hashes and revocable, HTTP-only sessions.
+- Signup email verification and expiring password-reset links use `AUTH_SMTP_*`.
+- Campaigns, leads, drafts, templates, send history, limits, jobs, and suppression
+  entries are all resolved through the authenticated account.
+- SMTP passwords use AES-256-GCM encryption with `CREDENTIALS_ENCRYPTION_KEY`.
+- On the first signup after upgrading an existing installation, unowned legacy
+  campaigns, templates, sends, and suppression entries are assigned to that account.
 
 Before your first real batch, confirm SPF, DKIM, and DMARC are set up on your
 sending domain. Without them a meaningful share of your mail lands in spam
@@ -126,11 +140,10 @@ data, and web-sourced contacts do not by themselves give you one.
   on file for a company — it won't surface a role nobody's published an address
   for. Thin results usually mean the title keywords or seniority/department
   filters are too tight; loosen them on the ICP screen and re-run.
-- **Sending runs in the background.** Pacing means a batch outlives an HTTP
-  request, so `/api/send` starts a job and the UI polls for progress. That job
-  lives in process memory — if you restart the server mid-batch, in-flight
-  progress is lost (already-sent messages are recorded in the database and will
-  not be re-sent).
+- **Sending runs as a durable background job.** Pacing means a batch outlives an
+  HTTP request, so `/api/send` stores progress in Postgres and the UI polls it.
+  Renewable worker leases let another instance resume after a restart, while
+  recorded draft attempts prevent duplicate delivery.
 - **Low-confidence drafts are flagged.** The copy agent is instructed to
   personalize only from data it actually has, and to mark a draft `low` when all
   it had was a job title. Read those before approving — a fabricated detail is

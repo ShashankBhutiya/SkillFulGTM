@@ -1,4 +1,3 @@
-import { env } from "../env";
 import { unsubscribeUrl } from "./unsubscribe";
 
 function escapeHtml(s: string): string {
@@ -13,6 +12,9 @@ export type ComposeArgs = {
   firstName: string;
   body: string;
   recipientEmail: string;
+  userId: string;
+  fromName: string;
+  postalAddress: string;
 };
 
 /**
@@ -20,9 +22,8 @@ export type ComposeArgs = {
  * the greeting, the sender's real identity, the physical postal address, and a
  * working opt-out. The model never writes these — they are not creative fields.
  */
-export function compose({ firstName, body, recipientEmail }: ComposeArgs) {
-  const { fromName } = env.smtp;
-  const unsub = unsubscribeUrl(recipientEmail);
+export function compose({ firstName, body, recipientEmail, userId, fromName, postalAddress }: ComposeArgs) {
+  const unsub = unsubscribeUrl(userId, recipientEmail);
   const greeting = firstName.trim() ? `Hi ${firstName.trim()},` : "Hi,";
   const clean = body.trim();
 
@@ -34,7 +35,7 @@ export function compose({ firstName, body, recipientEmail }: ComposeArgs) {
     fromName,
     "",
     "—",
-    env.postalAddress,
+    postalAddress,
     `Don't want these? Unsubscribe: ${unsub}`,
   ].join("\n");
 
@@ -49,7 +50,7 @@ ${paragraphs}
 <p style="margin:0 0 14px">${escapeHtml(fromName)}</p>
 <hr style="border:none;border-top:1px solid #e4e4e7;margin:22px 0 10px">
 <p style="margin:0;font-size:12px;color:#71717a">
-${escapeHtml(env.postalAddress)}<br>
+${escapeHtml(postalAddress)}<br>
 <a href="${unsub}" style="color:#71717a">Unsubscribe</a>
 </p>
 </div>`;

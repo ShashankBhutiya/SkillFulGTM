@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { newId, sql } from "@/lib/db";
+import { currentUser, unauthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 /** Starts a template-only campaign without spending AI or sourcing credits. */
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
   const { name } = (await req.json()) as { name?: string };
   const campaignName = name?.trim();
   if (!campaignName) {
@@ -16,9 +19,9 @@ export async function POST(req: Request) {
 
   const id = newId("cmp");
   await sql(
-    `INSERT INTO campaigns (id, company_name, company_input, icp, status)
-     VALUES ($1, $2, $3, NULL, 'importing')`,
-    [id, campaignName, JSON.stringify({ name: campaignName, mode: "template" })],
+    `INSERT INTO campaigns (id, user_id, company_name, company_input, icp, status)
+     VALUES ($1, $2, $3, $4, NULL, 'importing')`,
+    [id, user.id, campaignName, JSON.stringify({ name: campaignName, mode: "template" })],
   );
   return NextResponse.json({ campaignId: id });
 }

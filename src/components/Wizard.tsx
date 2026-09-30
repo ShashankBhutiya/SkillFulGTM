@@ -96,6 +96,7 @@ type SendJob = {
 type Config = {
   database: boolean;
   databasePooled: boolean;
+  credentialsEncryption: boolean;
   gemini: boolean;
   exa: boolean;
   hunter: boolean;
@@ -334,11 +335,12 @@ export default function Wizard() {
   const missing = config
     ? [
         !config.database && "DATABASE_URL",
+        !config.credentialsEncryption && "CREDENTIALS_ENCRYPTION_KEY",
         !config.gemini && "GEMINI_API_KEYS",
         !config.exa && "EXA_API_KEY",
         !config.hunter && "HUNTER_API_KEY",
-        !config.smtp && "SMTP settings",
-        !config.compliance && "UNSUBSCRIBE_SECRET / SENDER_POSTAL_ADDRESS",
+        !config.smtp && "verified sending mailbox",
+        !config.compliance && "sender postal address",
       ].filter(Boolean)
     : [];
 
@@ -376,10 +378,7 @@ export default function Wizard() {
 
       {missing.length > 0 && (
         <Alert tone="warn">
-          Not configured yet: <b>{missing.join(", ")}</b>. Copy{" "}
-          <code className="rounded bg-white/10 px-1">.env.example</code> to{" "}
-          <code className="rounded bg-white/10 px-1">.env.local</code> and restart the dev
-          server.
+          Not configured yet: <b>{missing.join(", ")}</b>. Configure platform services in the deployment environment and sender details in{" "}<a className="underline" href="/account">Account settings</a>.
         </Alert>
       )}
       {config?.database && !config.databasePooled && (
@@ -980,7 +979,7 @@ export default function Wizard() {
                     <div className="mt-2.5 text-xs text-rose-200/80 space-y-1">
                       <div className="font-semibold text-rose-300">Troubleshooting Steps:</div>
                       <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
-                        <li>Verify <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, and <code>SMTP_PASS</code> in your <code>.env.local</code>.</li>
+                        <li>Verify your SMTP host, port, username, and app password in <a className="underline" href="/account">Account settings</a>.</li>
                         <li><b>Gmail users:</b> You must create an <i>App Password</i> (Google Account &gt; Security &gt; App passwords) instead of your account password.</li>
                         <li><b>Port 587 vs 465:</b> 587 uses STARTTLS (`secure: false`), while 465 uses implicit SSL (`secure: true`).</li>
                       </ul>

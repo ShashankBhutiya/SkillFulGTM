@@ -3,6 +3,7 @@ import { draftEmail } from "@/lib/agents/draft";
 import { describeError } from "@/lib/gemini";
 import { newId, sql, store, type LeadRow } from "@/lib/db";
 import { CompanyInput, IcpSchema } from "@/lib/schemas";
+import { currentUser, unauthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 // 300s is the ceiling on Vercel's Hobby plan. Drafting fans out CONCURRENCY
@@ -42,20 +43,22 @@ async function mapLimit<T, R>(
 
 /** Step 3 — write one email per selected lead. */
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
   const { campaignId, redraft } = (await req.json()) as {
     campaignId?: string;
     /** Rewrite leads that already have a draft. Off by default so a second
      *  press resumes an interrupted run instead of paying for it twice. */
     redraft?: boolean;
   };
-  const campaign = campaignId ? await store.getCampaign(campaignId) : undefined;
+  const campaign = campaignId ? await store.getCampaign(user.id, campaignId) : undefined;
   if (!campaign?.icp) {
     return NextResponse.json({ error: "Campaign or ICP not found" }, { status: 404 });
   }
 
   const company = CompanyInput.parse(JSON.parse(campaign.company_input));
   const icp = IcpSchema.parse(JSON.parse(campaign.icp));
-  const selected = (await store.listSelectedLeads(campaign.id)).filter((l) => l.email);
+  const selected = (await store.listSelectedLeads(user.id, campaign.id)).filter((l) => l.email);
 
   if (!selected.length) {
     return NextResponse.json(
@@ -65,14 +68,14 @@ export async function POST(req: Request) {
   }
 
   const alreadyDrafted = new Set(
-    (await store.listDrafts(campaign.id)).map((d) => d.lead_id),
+    (await store.listDrafts(user.id, campaign.id)).map((d) => d.lead_id),
   );
   const leads = redraft ? selected : selected.filter((l) => !alreadyDrafted.has(l.id));
 
   // Every selected lead already has a draft and no rewrite was asked for.
   if (!leads.length) {
     return NextResponse.json({
-      drafts: await store.listDrafts(campaign.id),
+      drafts: await store.listDrafts(user.id, campaign.id),
       failures: [],
     });
   }
@@ -126,13 +129,15 @@ export async function POST(req: Request) {
   await sql("UPDATE campaigns SET status = 'drafted' WHERE id = $1", [campaign.id]);
 
   return NextResponse.json({
-    drafts: await store.listDrafts(campaign.id),
+    drafts: await store.listDrafts(user.id, campaign.id),
     failures,
   });
 }
 
 /** Edit or approve a single draft. Every field here is meant to be overridden. */
 export async function PATCH(req: Request) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
   const { draftId, campaignId, approveAll, subject, body, approved } = (await req.json()) as {
     draftId?: string;
     campaignId?: string;
@@ -142,7 +147,7 @@ export async function PATCH(req: Request) {
     approved?: boolean;
   };
   if (campaignId && approveAll) {
-    const campaign = await store.getCampaign(campaignId);
+    const campaign = await store.getCampaign(user.id, campaignId);
     if (!campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     await sql(
       `UPDATE drafts SET approved = TRUE
@@ -154,14 +159,17 @@ export async function PATCH(req: Request) {
   }
   if (!draftId) return NextResponse.json({ error: "draftId is required" }, { status: 400 });
 
-  const draft = await store.getDraft(draftId);
+  const draft = await store.getDraft(user.id, draftId);
   if (!draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
 
-  await sql("UPDATE drafts SET subject = $1, body = $2, approved = $3 WHERE id = $4", [
+  await sql(
+    `UPDATE drafts SET subject = $1, body = $2, approved = $3 WHERE id = $4
+     AND campaign_id IN (SELECT id FROM campaigns WHERE user_id = $5)`, [
     subject ?? draft.subject,
     body ?? draft.body,
     approved === undefined ? draft.approved : Boolean(approved),
     draftId,
+    user.id,
   ]);
 
   return NextResponse.json({ ok: true });

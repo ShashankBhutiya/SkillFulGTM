@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { newId, sql, store, tx } from "@/lib/db";
 import { normalizeFieldName } from "@/lib/email/template";
+import { currentUser, unauthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -24,13 +25,15 @@ function pick(row: Record<string, string>, field: keyof typeof aliases): string 
 }
 
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
   const { campaignId, rows, mode = "replace", rowOffset = 2 } = (await req.json()) as {
     campaignId?: string;
     rows?: ImportRow[];
     mode?: "append" | "replace";
     rowOffset?: number;
   };
-  const campaign = campaignId ? await store.getCampaign(campaignId) : undefined;
+  const campaign = campaignId ? await store.getCampaign(user.id, campaignId) : undefined;
   if (!campaign) return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
   if (mode !== "append" && mode !== "replace") {
     return NextResponse.json({ error: "Import mode must be append or replace." }, { status: 400 });
@@ -42,7 +45,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Import at most 1,000 recipients at a time." }, { status: 400 });
   }
 
-  const existingLeads = mode === "append" ? await store.listLeads(campaign.id) : [];
+  const existingLeads = mode === "append" ? await store.listLeads(user.id, campaign.id) : [];
   const existingEmails = new Set(existingLeads.map(({ email }) => email.trim().toLowerCase()).filter(Boolean));
   const seen = new Set<string>();
   const accepted: { normalized: Record<string, string>; email: string }[] = [];
@@ -83,7 +86,8 @@ export async function POST(req: Request) {
 
   const suppressed = new Set(
     (
-      await sql<{ email: string }>("SELECT email FROM suppression WHERE email = ANY($1::text[])", [
+      await sql<{ email: string }>("SELECT email FROM user_suppression WHERE user_id = $1 AND email = ANY($2::text[])", [
+        user.id,
         accepted.map(({ email }) => email),
       ])
     ).map(({ email }) => email),
@@ -119,7 +123,7 @@ export async function POST(req: Request) {
   });
 
   return NextResponse.json({
-    leads: await store.listLeads(campaign.id),
+    leads: await store.listLeads(user.id, campaign.id),
     imported: accepted.length,
     suppressed: suppressed.size,
     rejected,

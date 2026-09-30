@@ -1,27 +1,25 @@
 import nodemailer, { type Transporter } from "nodemailer";
-import { env } from "../env";
 import { newId, sql, store, type DraftRow, type LeadRow } from "../db";
+import type { MailboxConfig } from "../mailbox";
 import { compose } from "./compose";
 import { verifyEmail } from "../providers/hunter";
 
-let transporter: Transporter | null = null;
-
-function transport(): Transporter {
-  if (transporter) return transporter;
-  const s = env.smtp;
-  transporter = nodemailer.createTransport({
+function transport(s: MailboxConfig): Transporter {
+  return nodemailer.createTransport({
     host: s.host,
     port: s.port,
     secure: s.secure,
-    auth: { user: s.user, pass: s.pass },
+    auth: { user: s.username, pass: s.password },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
   });
-  return transporter;
 }
 
 /** Confirms the SMTP credentials work before a batch is started. */
-export async function verifyTransport(): Promise<{ ok: boolean; error?: string }> {
+export async function verifyTransport(mailbox: MailboxConfig): Promise<{ ok: boolean; error?: string }> {
   try {
-    await transport().verify();
+    await transport(mailbox).verify();
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -35,6 +33,7 @@ export type SendOutcome = {
 };
 
 async function record(
+  userId: string,
   campaignId: string,
   draftId: string,
   email: string,
@@ -43,9 +42,9 @@ async function record(
   messageId = "",
 ): Promise<void> {
   await sql(
-    `INSERT INTO sends (id, campaign_id, draft_id, email, status, detail, message_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [newId("snd"), campaignId, draftId, email.toLowerCase(), status, detail, messageId],
+    `INSERT INTO sends (id, user_id, campaign_id, draft_id, email, status, detail, message_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [newId("snd"), userId, campaignId, draftId, email.toLowerCase(), status, detail, messageId],
   );
 }
 
@@ -65,6 +64,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * back from the next sourcing run.
  */
 async function checkDeliverable(
+  userId: string,
   email: string,
   campaignId: string,
   draftId: string,
@@ -76,22 +76,24 @@ async function checkDeliverable(
   // An unverifiable address (accept-all domain) may well be real, so it is
   // skipped for this run but left eligible if the operator opts in later.
   if (!verdict.unknown) {
-    await store.suppress(email, `bad address: ${verdict.detail}`);
+    await store.suppress(userId, email, `bad address: ${verdict.detail}`);
   }
-  await record(campaignId, draftId, email, "skipped", verdict.detail);
+  await record(userId, campaignId, draftId, email, "skipped", verdict.detail);
   return { ok: false, detail: verdict.detail };
 }
 
 export async function sendBatch(
+  userId: string,
+  mailbox: MailboxConfig,
   campaignId: string,
   items: { draft: DraftRow; lead: LeadRow }[],
-  onProgress?: (outcome: SendOutcome, index: number) => void,
+  onProgress?: (outcome: SendOutcome, index: number) => void | Promise<void>,
 ): Promise<SendOutcome[]> {
   const outcomes: SendOutcome[] = [];
-  const s = env.smtp;
-  const from = s.fromName ? `"${s.fromName}" <${s.from}>` : s.from;
+  const s = mailbox;
+  const from = s.from_name ? `"${s.from_name}" <${s.from_email}>` : s.from_email;
 
-  let budget = env.maxSendsPerDay - (await store.sendsInLastDay());
+  let budget = s.max_sends_per_day - (await store.sendsInLastDay(userId));
 
   for (const [i, { draft, lead } ] of items.entries()) {
     const email = lead.email.trim().toLowerCase();
@@ -100,60 +102,69 @@ export async function sendBatch(
 
     if (!email) {
       outcome = { email: "", status: "skipped", detail: "No email address on this lead." };
-      await record(campaignId, draft.id, "", "skipped", outcome.detail);
-    } else if (await store.isSuppressed(email)) {
+      await record(userId, campaignId, draft.id, "", "skipped", outcome.detail);
+    } else if (await store.isSuppressed(userId, email)) {
       outcome = { email, status: "skipped", detail: "Address is on the suppression list." };
-      await record(campaignId, draft.id, email, "skipped", outcome.detail);
+      await record(userId, campaignId, draft.id, email, "skipped", outcome.detail);
     } else if (await store.alreadySent(campaignId, email)) {
       outcome = { email, status: "skipped", detail: "Already mailed in this campaign." };
-      await record(campaignId, draft.id, email, "skipped", outcome.detail);
+      await record(userId, campaignId, draft.id, email, "skipped", outcome.detail);
     } else if (budget <= 0) {
       outcome = {
         email,
         status: "skipped",
-        detail: `Daily cap of ${env.maxSendsPerDay} reached. Resume tomorrow or raise MAX_SENDS_PER_DAY.`,
+        detail: `Daily cap of ${s.max_sends_per_day} reached. Resume tomorrow or raise it in Mailbox settings.`,
       };
-      await record(campaignId, draft.id, email, "skipped", outcome.detail);
-    } else if (!(verdict = await checkDeliverable(email, campaignId, draft.id)).ok) {
+      await record(userId, campaignId, draft.id, email, "skipped", outcome.detail);
+    } else if (!(verdict = await checkDeliverable(userId, email, campaignId, draft.id)).ok) {
       outcome = { email, status: "skipped", detail: verdict.detail };
     } else {
       const { text, html, unsubscribeUrl } = compose({
         firstName: lead.first_name,
         body: draft.body,
         recipientEmail: email,
+        userId,
+        fromName: s.from_name,
+        postalAddress: s.postal_address,
       });
 
       try {
-        const info = await transport().sendMail({
+        const lastSentAt = await store.lastSendAt(userId);
+        if (lastSentAt) {
+          const elapsed = Date.now() - new Date(lastSentAt).getTime();
+          const remaining = s.seconds_between * 1000 - elapsed;
+          if (remaining > 0) await sleep(remaining);
+        }
+        const info = await transport(s).sendMail({
           from,
           to: email,
-          replyTo: s.replyTo || undefined,
+          replyTo: s.reply_to || undefined,
           subject: draft.subject,
           text,
           html,
           headers: {
             // Puts a native "Unsubscribe" control in Gmail and Outlook, which
             // is what recipients click instead of "report spam".
-            "List-Unsubscribe": `<${unsubscribeUrl}>, <mailto:${s.from}?subject=unsubscribe>`,
+            "List-Unsubscribe": `<${unsubscribeUrl}>, <mailto:${s.from_email}?subject=unsubscribe>`,
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
           },
         });
         budget -= 1;
         outcome = { email, status: "sent", detail: "" };
-        await record(campaignId, draft.id, email, "sent", "", info.messageId ?? "");
+        await record(userId, campaignId, draft.id, email, "sent", "", info.messageId ?? "");
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         outcome = { email, status: "failed", detail };
-        await record(campaignId, draft.id, email, "failed", detail);
+        await record(userId, campaignId, draft.id, email, "failed", detail);
       }
     }
 
     outcomes.push(outcome);
-    onProgress?.(outcome, i);
+    await onProgress?.(outcome, i);
 
     // Only pace after an actual delivery; skips cost nothing.
     if (outcome.status === "sent" && i < items.length - 1) {
-      await sleep(env.secondsBetweenSends * 1000);
+      await sleep(s.seconds_between * 1000);
     }
   }
 
@@ -162,30 +173,37 @@ export async function sendBatch(
 
 /** Sends a single test email directly to the operator's inbox for verification. */
 export async function sendTestEmail({
+  userId,
+  mailbox,
   to,
   subject = "SkillfulGTM — Test Email Verification",
   body = "This is a test email sent from SkillfulGTM to verify your SMTP delivery setup.",
   firstName = "Test Recipient",
 }: {
+  userId: string;
+  mailbox: MailboxConfig;
   to: string;
   subject?: string;
   body?: string;
   firstName?: string;
 }): Promise<{ ok: boolean; messageId?: string; error?: string }> {
-  const s = env.smtp;
-  const from = s.fromName ? `"${s.fromName}" <${s.from}>` : s.from;
+  const s = mailbox;
+  const from = s.from_name ? `"${s.from_name}" <${s.from_email}>` : s.from_email;
 
   const { text, html, unsubscribeUrl } = compose({
     firstName,
     body: `${body}\n\n---\nNote: This is a test email copy sent from SkillfulGTM.`,
     recipientEmail: to,
+    userId,
+    fromName: s.from_name,
+    postalAddress: s.postal_address,
   });
 
   try {
-    const info = await transport().sendMail({
+    const info = await transport(s).sendMail({
       from,
       to,
-      replyTo: s.replyTo || undefined,
+      replyTo: s.reply_to || undefined,
       subject: `[TEST] ${subject}`,
       text,
       html: `

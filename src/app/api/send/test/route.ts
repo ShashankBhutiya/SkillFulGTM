@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { verifyTransport, sendTestEmail } from "@/lib/email/sender";
 import { store } from "@/lib/db";
+import { currentUser, unauthorized } from "@/lib/auth";
+import { getMailbox } from "@/lib/mailbox";
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
+  if (!user.email_verified) return NextResponse.json({ error: "Verify your account email before sending tests." }, { status: 403 });
   try {
     const { toEmail, subject, body, draftId } = (await req.json()) as {
       toEmail?: string;
@@ -21,11 +26,19 @@ export async function POST(req: Request) {
     }
 
     // Verify SMTP connection credentials
-    const check = await verifyTransport();
+    const mailbox = await getMailbox(user.id);
+    if (!mailbox) {
+      return NextResponse.json({ error: "Connect your sending mailbox in Account settings first." }, { status: 400 });
+    }
+    const recipient = toEmail.trim().toLowerCase();
+    if (recipient !== user.email.toLowerCase() && recipient !== mailbox.from_email.toLowerCase()) {
+      return NextResponse.json({ error: "Test emails can only be sent to your account or connected mailbox address." }, { status: 400 });
+    }
+    const check = await verifyTransport(mailbox);
     if (!check.ok) {
       return NextResponse.json(
         {
-          error: `SMTP connection failed: ${check.error}. Please verify your SMTP settings (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS) in .env.local.`,
+          error: `SMTP connection failed: ${check.error}. Please verify your mailbox settings.`,
           details: check.error,
         },
         { status: 502 },
@@ -37,11 +50,11 @@ export async function POST(req: Request) {
     let testFirstName = "Test Recipient";
 
     if (draftId) {
-      const draft = await store.getDraft(draftId);
+      const draft = await store.getDraft(user.id, draftId);
       if (draft) {
         testSubject = draft.subject;
         testBody = draft.body;
-        const lead = await store.getLead(draft.lead_id);
+        const lead = await store.getLead(user.id, draft.lead_id);
         if (lead?.first_name) {
           testFirstName = lead.first_name;
         }
@@ -49,6 +62,8 @@ export async function POST(req: Request) {
     }
 
     const result = await sendTestEmail({
+      userId: user.id,
+      mailbox,
       to: toEmail.trim(),
       subject: testSubject || "SkillfulGTM — Test Email Verification",
       body:

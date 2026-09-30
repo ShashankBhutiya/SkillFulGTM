@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { store } from "@/lib/db";
+import { currentUser, unauthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -8,13 +9,15 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
   const { id } = await params;
-  const campaign = await store.getCampaign(id);
+  const campaign = await store.getCampaign(user.id, id);
   if (!campaign) {
     return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
   }
 
-  const [leads, drafts] = await Promise.all([store.listLeads(id), store.listDrafts(id)]);
+  const [leads, drafts] = await Promise.all([store.listLeads(user.id, id), store.listDrafts(user.id, id)]);
 
   return NextResponse.json({
     campaign: {

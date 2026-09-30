@@ -10,7 +10,7 @@ const LINKS = [
   { href: "#app", id: "app", label: "Launch" },
 ];
 
-export default function SiteHeader() {
+export default function SiteHeader({ user }: { user: { name: string; email: string } | null }) {
   const [stuck, setStuck] = useState(false);
   const [open, setOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("");
@@ -115,10 +115,10 @@ export default function SiteHeader() {
           {/* Desktop & Mobile Actions */}
           <div className="flex items-center gap-3">
             <a
-              href="#app"
+              href={user ? "/account" : "/signup"}
               className="sk-btn sk-btn-primary hidden sm:inline-flex group shadow-lg shadow-violet-500/10 hover:shadow-violet-500/25"
             >
-              <span>Start a campaign</span>
+              <span>{user ? user.name.split(" ")[0] || "Account" : "Create account"}</span>
               <svg
                 width="14"
                 height="14"
@@ -208,11 +208,11 @@ export default function SiteHeader() {
 
               <div className="pt-2">
                 <a
-                  href="#app"
+                  href={user ? "/account" : "/signup"}
                   onClick={() => setOpen(false)}
                   className="sk-btn sk-btn-primary w-full justify-center text-center py-2.5"
                 >
-                  Start a campaign
+                  {user ? "Account settings" : "Create account"}
                 </a>
               </div>
             </div>

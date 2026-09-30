@@ -22,6 +22,10 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function maybe(name: string): string {
+  return process.env[name]?.trim() ?? "";
+}
+
 /** Splits a comma/whitespace/newline separated list, dropping blanks. */
 function list(name: string): string[] {
   const v = process.env[name];
@@ -33,6 +37,20 @@ function list(name: string): string[] {
 }
 
 export const env = {
+  get credentialsEncryptionKey() {
+    return req("CREDENTIALS_ENCRYPTION_KEY");
+  },
+  get authMail() {
+    const port = num("AUTH_SMTP_PORT", 587);
+    return {
+      host: maybe("AUTH_SMTP_HOST"),
+      port,
+      secure: port === 465,
+      user: maybe("AUTH_SMTP_USER"),
+      pass: maybe("AUTH_SMTP_PASS"),
+      from: maybe("AUTH_SMTP_FROM"),
+    };
+  },
   /** One or more Gemini keys. Multiple keys are round-robined to spread quota. */
   get geminiKeys() {
     const keys = list("GEMINI_API_KEYS");
@@ -95,29 +113,11 @@ export const env = {
     return req("HUNTER_API_KEY");
   },
 
-  get smtp() {
-    const port = num("SMTP_PORT", 587);
-    return {
-      host: req("SMTP_HOST"),
-      port,
-      // 465 is implicit TLS; 587 upgrades via STARTTLS.
-      secure: port === 465,
-      user: req("SMTP_USER"),
-      pass: req("SMTP_PASS"),
-      fromName: opt("SMTP_FROM_NAME", ""),
-      from: req("SMTP_FROM"),
-      replyTo: opt("SMTP_REPLY_TO", ""),
-    };
-  },
-
   get baseUrl() {
     return opt("APP_BASE_URL", "http://localhost:3000").replace(/\/+$/, "");
   },
   get unsubscribeSecret() {
     return req("UNSUBSCRIBE_SECRET");
-  },
-  get postalAddress() {
-    return req("SENDER_POSTAL_ADDRESS");
   },
 
   /**
@@ -154,12 +154,6 @@ export const env = {
     return /^(1|true|yes)$/i.test(process.env.SEND_TO_RISKY_ADDRESSES?.trim() ?? "");
   },
 
-  get maxSendsPerDay() {
-    return num("MAX_SENDS_PER_DAY", 40);
-  },
-  get secondsBetweenSends() {
-    return num("SECONDS_BETWEEN_SENDS", 45);
-  },
 };
 
 /** Reports which settings are missing without throwing — used by the UI banner. */
@@ -182,12 +176,12 @@ export function configStatus() {
   return {
     database,
     databasePooled,
+    credentialsEncryption: check("CREDENTIALS_ENCRYPTION_KEY"),
     gemini: check("GEMINI_API_KEYS"),
     exa: check("EXA_API_KEY"),
     hunter: check("HUNTER_API_KEY"),
-    smtp:
-      check("SMTP_HOST") && check("SMTP_USER") && check("SMTP_PASS") && check("SMTP_FROM"),
-    compliance: check("UNSUBSCRIBE_SECRET") && check("SENDER_POSTAL_ADDRESS"),
+    smtp: false,
+    compliance: check("UNSUBSCRIBE_SECRET"),
     // Reported separately: everything else can be set and this still blocks sending.
     publicBaseUrl: !env.baseUrlIsLocal,
   };
