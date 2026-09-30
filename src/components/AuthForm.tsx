@@ -14,6 +14,18 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (mode === "signup" && !name.trim()) {
+      setError("Enter your name.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    if (password.length < 12) {
+      setError("Your password must contain at least 12 characters.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -44,7 +56,7 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
       <div className="mt-4"><label className={label}>Email</label><input className={input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required /></div>
       <div className="mt-4"><label className={label}>Password</label><input className={input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength={12} required /><p className="mt-1.5 text-xs text-[#77778c]">{mode === "signup" ? "At least 12 characters." : ""}</p></div>
       {mode === "login" && <div className="mt-2 text-right"><a href="/forgot-password" className="text-xs text-violet-300 hover:text-white">Forgot password?</a></div>}
-      <Button className="mt-5 w-full justify-center" busy={busy} disabled={busy}>{mode === "signup" ? "Create account" : "Sign in"}</Button>
+      <Button type="submit" className="mt-5 w-full justify-center" busy={busy} disabled={busy}>{mode === "signup" ? "Create account" : "Sign in"}</Button>
       <p className="mt-5 text-center text-sm text-[#9494a8]">{mode === "signup" ? "Already have an account?" : "New to SkillfulGTM?"} <a className="text-violet-300 hover:text-violet-200" href={mode === "signup" ? "/login" : "/signup"}>{mode === "signup" ? "Sign in" : "Create an account"}</a></p>
     </form>
   );
