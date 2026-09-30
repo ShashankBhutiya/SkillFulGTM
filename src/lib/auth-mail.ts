@@ -27,7 +27,9 @@ export function authTokenHash(token: string): string {
 export async function sendAuthEmail(to: string, kind: "verify" | "reset", token: string): Promise<void> {
   const config = env.authMail;
   if (!authMailConfigured()) {
-    if (process.env.NODE_ENV === "production") throw new Error("Account email delivery is not configured.");
+    if (process.env.NODE_ENV === "production" && !env.baseUrlIsLocal) {
+      throw new Error("Account email delivery is not configured.");
+    }
     console.info(`[development] ${kind} link: ${link(kind, token)}`);
     return;
   }

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSession, findUserByEmail, hasValidOrigin, registerUser, setSessionCookie } from "@/lib/auth";
 import { authMailConfigured, issueAuthToken, sendAuthEmail } from "@/lib/auth-mail";
+import { env } from "@/lib/env";
+import { sql } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -14,7 +16,10 @@ export async function POST(req: Request) {
   if (!password || password.length < 12 || password.length > 200) {
     return NextResponse.json({ error: "Use a password with at least 12 characters." }, { status: 400 });
   }
-  if (process.env.NODE_ENV === "production" && !authMailConfigured()) {
+  const requestHost = new URL(req.url).hostname.toLowerCase();
+  const localRequest = requestHost === "localhost" || requestHost === "127.0.0.1" || requestHost === "::1";
+  const localWithoutMailer = (localRequest || env.baseUrlIsLocal) && !authMailConfigured();
+  if (process.env.NODE_ENV === "production" && !localRequest && !env.baseUrlIsLocal && !authMailConfigured()) {
     return NextResponse.json({ error: "Account email delivery is not configured." }, { status: 503 });
   }
   if (await findUserByEmail(normalized)) {
@@ -22,8 +27,13 @@ export async function POST(req: Request) {
   }
   try {
     const user = await registerUser(name, normalized, password);
-    const verifyToken = await issueAuthToken(user.id, "verify", 24 * 60);
-    await sendAuthEmail(user.email, "verify", verifyToken);
+    if (localWithoutMailer) {
+      await sql("UPDATE users SET email_verified = TRUE WHERE id = $1", [user.id]);
+      user.email_verified = true;
+    } else {
+      const verifyToken = await issueAuthToken(user.id, "verify", 24 * 60);
+      await sendAuthEmail(user.email, "verify", verifyToken);
+    }
     const response = NextResponse.json({ user }, { status: 201 });
     setSessionCookie(response, await createSession(user.id));
     return response;

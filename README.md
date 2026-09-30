@@ -117,6 +117,9 @@ options:
 
 - Email/password accounts use scrypt password hashes and revocable, HTTP-only sessions.
 - Signup email verification and expiring password-reset links use `AUTH_SMTP_*`.
+- On localhost only, new accounts are automatically verified when `AUTH_SMTP_*`
+  is absent so local development is not blocked. Public production deployments
+  still require account-email delivery.
 - Campaigns, leads, drafts, templates, send history, limits, jobs, and suppression
   entries are all resolved through the authenticated account.
 - SMTP passwords use AES-256-GCM encryption with `CREDENTIALS_ENCRYPTION_KEY`.
