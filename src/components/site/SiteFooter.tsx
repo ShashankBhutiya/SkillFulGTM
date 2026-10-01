@@ -20,6 +20,7 @@ export default function SiteFooter() {
             <div>
               <div className="sk-eyebrow mb-3">Product</div>
               <ul className="space-y-2 text-[#8b8b9e]">
+                <li><a href="/privacy" className="transition-colors hover:text-white">Privacy policy</a></li>
                 <li>
                   <a href="#how" className="transition-colors hover:text-white">
                     Guardrails
