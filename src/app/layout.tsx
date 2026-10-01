@@ -16,6 +16,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  verification: { google: "cmFUOSkiFdiZy7zmyyQFHmAo1UL0osREzPDAv8ymg9Q" },
   title: {
     default: "SkillfulGTM — Agentic GTM Outbound Pipeline",
     template: "%s | SkillfulGTM",
@@ -64,4 +65,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-
