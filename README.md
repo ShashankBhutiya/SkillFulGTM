@@ -56,6 +56,31 @@ never sent back to the browser.
 
 ### SMTP for common providers
 
+### Connect with Google
+
+Account settings includes **Connect with Google**, which authorizes Gmail SMTP
+using OAuth instead of a password. Create a Google Cloud OAuth client with type
+**Web application**, configure the Google Auth Platform consent screen, and set
+`GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` on the server. Set
+`APP_BASE_URL` to the app's actual origin and register this exact redirect URI:
+`{APP_BASE_URL}/api/account/google/callback` (no trailing slash).
+
+Add `openid`, `email`, and `https://mail.google.com/` to the consent configuration.
+Gmail SMTP requires the broad, restricted mail scope; this grants mailbox access
+beyond sending. Public use may require Google's verification and security
+assessment. In testing mode, add your account as a test user; Google generally
+expires refresh tokens after seven days in this mode. Production callbacks must
+use HTTPS; localhost HTTP works for development.
+
+Restart the app, open Account settings, connect Google, then save the physical
+postal address and verify the connection. Refresh tokens are encrypted at rest;
+Google's token endpoint renews access tokens when sending. Disconnect removes
+the app's stored connection; permission can also be revoked in Google Account
+settings. Account-email verification remains a separate requirement.
+
+See [Google's web-server OAuth documentation](https://developers.google.com/identity/protocols/oauth2/web-server)
+and [Gmail SMTP OAuth scopes](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol).
+
 | Provider | Host | Port | Password |
 | --- | --- | --- | --- |
 | Google Workspace | `smtp.gmail.com` | 587 | App Password (requires 2FA enabled) |

@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS mailboxes (
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS auth_type TEXT NOT NULL DEFAULT 'password';
+
 CREATE TABLE IF NOT EXISTS campaigns (
   id            TEXT PRIMARY KEY,
   user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
@@ -313,6 +315,7 @@ export type UserRow = {
 };
 
 export type MailboxRow = {
+  auth_type: "password" | "google";
   user_id: string;
   host: string;
   port: number;

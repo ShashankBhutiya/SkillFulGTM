@@ -3,13 +3,16 @@ import { newId, sql, store, type DraftRow, type LeadRow } from "../db";
 import type { MailboxConfig } from "../mailbox";
 import { compose } from "./compose";
 import { verifyEmail } from "../providers/hunter";
+import { env } from "../env";
 
 function transport(s: MailboxConfig): Transporter {
   return nodemailer.createTransport({
     host: s.host,
     port: s.port,
     secure: s.secure,
-    auth: { user: s.username, pass: s.password },
+    auth: s.auth_type === "google"
+      ? { type: "OAuth2", user: s.username, refreshToken: s.password, clientId: env.googleOAuth.clientId, clientSecret: env.googleOAuth.clientSecret }
+      : { user: s.username, pass: s.password },
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 30_000,

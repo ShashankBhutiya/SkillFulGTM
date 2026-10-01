@@ -149,3 +149,55 @@ test('template imports can send without a Hunter API key', async () => {
     if (saved !== undefined) process.env.HUNTER_API_KEY = saved;
   }
 });
+
+
+test('Google callback rejects wrong state, expired state, and another signed-in user before token exchange', async () => {
+  let writes = 0;
+  let saved;
+  const callback = load('src/app/api/account/google/callback/route.ts', {
+    'next/headers': { cookies: async () => ({ get: () => ({ value: 'encrypted' }) }) },
+    '@/lib/auth': { currentUser: async () => ({ id: 'user-1' }) },
+    '@/lib/env': { env: { baseUrl: 'http://localhost:3000' } },
+    '@/lib/db': { sql: async () => { writes++; } },
+    '@/lib/mailbox': { decryptSecret: () => JSON.stringify(saved), encryptSecret: () => 'encrypted' },
+  });
+  for (const invalid of [
+    { state: 'other', userId: 'user-1', expires: Date.now() + 60000 },
+    { state: 'expected', userId: 'user-2', expires: Date.now() + 60000 },
+    { state: 'expected', userId: 'user-1', expires: 1 },
+  ]) {
+    saved = invalid;
+    const result = await callback.GET(new Request('http://localhost:3000/api/account/google/callback?state=expected&code=test'));
+    assert.match(result.headers.get('location'), /google=expired/);
+    assert.match(result.headers.get('set-cookie'), /Max-Age=0/);
+  }
+  assert.equal(writes, 0);
+});
+
+test('Google callback encrypts the refresh token and binds mailbox ownership to the authenticated user', async () => {
+  const originalFetch = global.fetch;
+  const queries = [];
+  const secrets = [];
+  const callback = load('src/app/api/account/google/callback/route.ts', {
+    'next/headers': { cookies: async () => ({ get: () => ({ value: 'encrypted-state' }) }) },
+    '@/lib/auth': { currentUser: async () => ({ id: 'user-1' }) },
+    '@/lib/env': { env: { baseUrl: 'http://localhost:3000', googleOAuth: { clientId: 'id', clientSecret: 'secret', redirectUri: 'http://localhost:3000/api/account/google/callback' } } },
+    '@/lib/db': { sql: async (...args) => queries.push(args) },
+    '@/lib/mailbox': { decryptSecret: () => JSON.stringify({ state: 'expected', verifier: 'pkce', userId: 'user-1', expires: Date.now() + 60000 }), encryptSecret: value => { secrets.push(value); return 'encrypted-refresh'; } },
+  });
+  global.fetch = async (url, options) => {
+    if (String(url).includes('/token')) {
+      assert.equal(options.body.get('code_verifier'), 'pkce');
+      return Response.json({ access_token: 'access', refresh_token: 'refresh', scope: 'openid email https://mail.google.com/' });
+    }
+    assert.equal(options.headers.Authorization, 'Bearer access');
+    return Response.json({ email: 'Sender@gmail.com', email_verified: true });
+  };
+  try {
+    const result = await callback.GET(new Request('http://localhost:3000/api/account/google/callback?state=expected&code=test'));
+    assert.match(result.headers.get('location'), /google=connected/);
+    assert.deepEqual(secrets, ['refresh']);
+    assert.deepEqual(queries[0][1], ['user-1', 'sender@gmail.com', 'encrypted-refresh']);
+    assert.doesNotMatch(result.headers.get('location'), /refresh|access/);
+  } finally { global.fetch = originalFetch; }
+});

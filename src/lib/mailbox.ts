@@ -40,6 +40,7 @@ export async function getMailbox(userId: string): Promise<MailboxConfig | null> 
 export function publicMailbox(row: MailboxConfig | null) {
   if (!row) return null;
   return {
+    authType: row.auth_type ?? "password",
     host: row.host,
     port: row.port,
     secure: row.secure,

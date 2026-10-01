@@ -37,6 +37,9 @@ function list(name: string): string[] {
 }
 
 export const env = {
+  get googleOAuth() {
+    return { clientId: req("GOOGLE_OAUTH_CLIENT_ID"), clientSecret: req("GOOGLE_OAUTH_CLIENT_SECRET"), redirectUri: `${this.baseUrl.replace(/\/$/, "")}/api/account/google/callback` };
+  },
   get credentialsEncryptionKey() {
     return req("CREDENTIALS_ENCRYPTION_KEY");
   },

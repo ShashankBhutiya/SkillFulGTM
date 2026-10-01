@@ -30,6 +30,15 @@ export const PUT = apiRoute(async function PUT(req: Request) {
   }
   const input = parsed.data;
   const existing = await getMailbox(user.id);
+  if (existing?.auth_type === "google") {
+    if (input.host !== "smtp.gmail.com" || input.port !== 587 || input.secure || input.username !== existing.username || input.fromEmail !== existing.username || input.password) {
+      return NextResponse.json({ error: "Google manages your mailbox credentials. Disconnect Google before changing the sending account." }, { status: 400 });
+    }
+    await sql(`UPDATE mailboxes SET from_name=$2, reply_to=$3, postal_address=$4,
+      max_sends_per_day=$5, seconds_between=$6, updated_at=now() WHERE user_id=$1`,
+      [user.id, input.fromName, input.replyTo, input.postalAddress, input.maxSendsPerDay, input.secondsBetween]);
+    return NextResponse.json({ mailbox: publicMailbox(await getMailbox(user.id)) });
+  }
   const host = String(input.host ?? "").trim();
   const port = Number(input.port);
   const username = String(input.username ?? "").trim();
